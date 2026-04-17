@@ -1,0 +1,24 @@
+[project]
+name = "hand-visibility-detector"
+version = "0.1.0"
+description = "Per-keypoint hand visibility detection using WiLoR-mini"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "wilor-mini @ git+https://github.com/warmshao/WiLoR-mini",
+    "huggingface-hub>=0.20",
+    "dill",
+]
+
+[project.optional-dependencies]
+demo = ["gradio>=4.0", "imageio-ffmpeg>=0.5"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hand_visibility_detector"]
