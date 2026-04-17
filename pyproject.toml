@@ -3,7 +3,7 @@ name = "hand-visibility-detector"
 version = "0.1.0"
 description = "Per-keypoint hand visibility detection using WiLoR-mini"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
     "wilor-mini @ git+https://github.com/warmshao/WiLoR-mini",
     "huggingface-hub>=0.20",
