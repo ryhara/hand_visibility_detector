@@ -27,10 +27,10 @@ WILOR_FEAT_DIM = 1280
 
 class _WiLoRBackboneWrapper(nn.Module):
     """Wrap the WiLoR ViT backbone so it returns only the spatial feature
-    map (B, 1280, 16, 12) expected by VisibilityHead.
+    map ``(B, 1280, 16, 12)`` expected by :class:`VisibilityHead`.
 
-    The WiLoR ViT was trained on (H=256, W=192) crops.  When a square
-    256x256 tensor is fed in, we centre-crop to 256x192 via
+    The WiLoR ViT was trained on ``(H=256, W=192)`` crops. When a square
+    ``256x256`` tensor is fed in, we centre-crop to ``256x192`` via
     ``x[:, :, :, 32:-32]``.
     """
 
@@ -115,7 +115,34 @@ class VisibilityHead(nn.Module):
 
 
 class HandVisibilityNet(nn.Module):
-    """Contact4D-style hand-keypoint visibility classifier (WiLoR backbone)."""
+    """Contact4D-style hand-keypoint visibility classifier (WiLoR backbone).
+
+    Pass a raw WiLoR ViT backbone (from ``wilor_mini``) and this module wraps
+    it with the RTMPose-style visibility head. Use
+    :meth:`from_wilor_backbone` for inference with a pre-trained head.
+    """
+
+    def __init__(
+        self,
+        raw_backbone: nn.Module,
+        dropout: float = 0.0,
+        hidden_dim: int = 256,
+        num_keypoints: int = NUM_HAND_KEYPOINTS,
+        freeze_backbone: bool = False,
+    ) -> None:
+        super().__init__()
+        self.backbone = _WiLoRBackboneWrapper(raw_backbone)
+        self.head = VisibilityHead(
+            in_channels=WILOR_FEAT_DIM,
+            hidden_dim=hidden_dim,
+            num_keypoints=num_keypoints,
+        )
+        self.dropout = nn.Dropout2d(dropout) if dropout > 0 else nn.Identity()
+        self.num_keypoints = num_keypoints
+        self.freeze_backbone = freeze_backbone
+        if freeze_backbone:
+            for p in self.backbone.parameters():
+                p.requires_grad_(False)
 
     @classmethod
     def from_wilor_backbone(
@@ -125,21 +152,13 @@ class HandVisibilityNet(nn.Module):
         hidden_dim: int = 256,
         num_keypoints: int = NUM_HAND_KEYPOINTS,
     ) -> "HandVisibilityNet":
-        """Build from an already-loaded WiLoR backbone (avoids duplicate
-        model load -- shares the ViT weights in memory)."""
-        model = cls.__new__(cls)
-        nn.Module.__init__(model)
-        model.backbone = _WiLoRBackboneWrapper(raw_backbone)
-        model.head = VisibilityHead(
-            in_channels=WILOR_FEAT_DIM,
+        """Build a frozen-backbone model and load the pre-trained head."""
+        model = cls(
+            raw_backbone=raw_backbone,
             hidden_dim=hidden_dim,
             num_keypoints=num_keypoints,
+            freeze_backbone=True,
         )
-        model.dropout = nn.Identity()
-        model.num_keypoints = num_keypoints
-        model.freeze_backbone = True
-        for p in model.backbone.parameters():
-            p.requires_grad_(False)
         model.head.load_state_dict(head_state_dict, strict=True)
         return model
 
@@ -161,3 +180,9 @@ class HandVisibilityNet(nn.Module):
     @torch.no_grad()
     def predict_proba(self, x: torch.Tensor) -> torch.Tensor:
         return torch.sigmoid(self.forward(x))
+
+    def head_state_dict(self) -> dict:
+        return self.head.state_dict()
+
+    def load_head_state_dict(self, state_dict: dict, strict: bool = True) -> None:
+        self.head.load_state_dict(state_dict, strict=strict)

@@ -1,0 +1,76 @@
+# WiLoR ViT backbone (frozen) + Contact4D-style visibility head, trained on
+# COCO-WholeBody hand annotations.
+#
+# COCO-WholeBody visibility flags (v in {0, 1, 2}):
+#   v == 0  -> not labeled  (mask=0, target ignored)
+#   v == 1  -> labeled, occluded -> target=0
+#   v == 2  -> labeled, visible  -> target=1
+
+data:
+  type: cocowholebody
+  coco_root: /path/to/COCO-WholeBody
+  train_ann: ${data.coco_root}/annotations/coco_wholebody_train_v1.0.json
+  val_ann:   ${data.coco_root}/annotations/coco_wholebody_val_v1.0.json
+  train_img_dir: ${data.coco_root}/train2017
+  val_img_dir:   ${data.coco_root}/val2017
+  crop_size: 256            # WiLoR wrapper auto-center-crops 256 -> 192 on the width axis
+  bbox_expand: 1.25
+  # Drop hands whose bbox shorter side is below this many pixels in the
+  # original image. Filters degenerate annotations.
+  min_bbox_side: 20
+
+  augment:
+    affine:
+      enabled: true
+      rot_deg: 30.0
+      scale_range: [0.8, 1.2]
+    hflip:
+      enabled: true
+      p: 0.5
+    color_jitter:
+      enabled: true
+      brightness: [0.8, 1.2]
+      contrast: [0.8, 1.2]
+    hsv:
+      enabled: true
+      p: 1.0
+      h: 0.015
+      s: 0.7
+      v: 0.4
+    gaussian_blur:
+      enabled: true
+      p: 0.3
+      kernel_range: [3, 7]
+      sigma_range: [0.1, 2.0]
+    grayscale:
+      enabled: true
+      p: 0.2
+
+model:
+  freeze_backbone: true
+  dropout: 0.1
+  hidden_dim: 256
+
+train:
+  epochs: 150
+  batch_size: 64
+  grad_accum_steps: 4
+  lr: 1.0e-3
+  weight_decay: 0.05
+  warmup_epochs: 3
+  warmup_start_factor: 1.0e-3
+  num_workers: 8
+  amp: true
+  grad_clip: 1.0
+  # Paper does not describe class-imbalance handling; set to "auto" to enable
+  # auto-estimated per-keypoint reweighting.
+  pos_weight: null
+  out_dir: runs/coco
+  seed: 0
+  log_every: 50
+  val_every_epoch: 5
+
+wandb:
+  enabled: true
+  project: hand-visibility
+  name: null

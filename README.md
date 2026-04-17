@@ -6,7 +6,7 @@ Given an RGB image, the pipeline detects both hands and predicts a visibility sc
 Pretrained weights are hosted on HuggingFace Hub: **[ryhara/hand-visibility-detector](https://huggingface.co/ryhara/hand-visibility-detector)**
 
 ## Update
-- [ ] add training code
+- [x] 2026/04/17 add training code
 - [x] 2026/04/17 publish to github
 
 ## Installation
@@ -33,6 +33,7 @@ git clone https://github.com/ryhara/hand_visibility_detector.git
 cd hand_visibility_detector
 uv sync                  # base deps
 uv sync --extra demo     # + Gradio demo deps
+uv sync --extra train    # + training deps (omegaconf, tqdm, scikit-learn, wandb, opencv-python)
 ```
 
 ## Demo
@@ -47,6 +48,26 @@ Gradio UI:
 
 ```bash
 python demo_gradio.py
+```
+
+## Training
+
+```bash
+uv sync --extra train
+```
+
+```bash
+# HInt (frozen WiLoR backbone + head-only training)
+python -m training.train --config training/configs/hint.yaml
+
+# COCO-WholeBody
+python -m training.train --config training/configs/coco.yaml
+
+# Override any field via dotted OmegaConf args, e.g.
+python -m training.train --config training/configs/hint.yaml \
+    data.hint_root=/mnt/ssd2/HInt_annotation_partial \
+    train.out_dir=runs/hint_run1 \
+    wandb.enabled=false
 ```
 
 ## Dataset

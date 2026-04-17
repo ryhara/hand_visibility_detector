@@ -1,0 +1,77 @@
+# WiLoR ViT backbone (frozen) + Contact4D-style visibility head, trained on
+# HInt (HInt_annotation_partial).
+#
+# HInt labels absent (out-of-frame) keypoints with existence=0; these are
+# folded into the "occluded" class so the mask is always 1 and the model
+# learns to predict visibility for every one of the 21 keypoints.
+#
+# ego4d subsets are JSON-only (no image files) and are excluded here.
+
+data:
+  type: hint
+  hint_root: /path/to/HInt_annotation_partial
+  train_subsets:
+    - TRAIN_newdays_img
+    - TRAIN_epick_img
+    - VAL_newdays_img
+    - VAL_epick_img
+  val_subsets:
+    - TEST_newdays_img
+    - TEST_epick_img
+  crop_size: 256            # WiLoR wrapper auto-center-crops 256 -> 192 on the width axis
+  bbox_expand: 1.25
+  min_bbox_side: 20
+
+  augment:
+    affine:
+      enabled: true
+      rot_deg: 30.0
+      scale_range: [0.8, 1.2]
+    hflip:
+      enabled: true
+      p: 0.5
+    color_jitter:
+      enabled: true
+      brightness: [0.8, 1.2]
+      contrast: [0.8, 1.2]
+    hsv:
+      enabled: true
+      p: 1.0
+      h: 0.5
+      s: 0.7
+      v: 0.5
+    gaussian_blur:
+      enabled: true
+      p: 0.3
+      kernel_range: [3, 7]
+      sigma_range: [0.1, 2.0]
+    grayscale:
+      enabled: true
+      p: 0.1
+
+model:
+  freeze_backbone: true
+  dropout: 0.1
+  hidden_dim: 256
+
+train:
+  epochs: 150
+  batch_size: 64
+  grad_accum_steps: 4
+  lr: 1.0e-3
+  weight_decay: 0.05
+  warmup_epochs: 3
+  warmup_start_factor: 1.0e-3
+  num_workers: 8
+  amp: true
+  grad_clip: 1.0
+  pos_weight: null
+  out_dir: runs/hint
+  seed: 0
+  log_every: 50
+  val_every_epoch: 2
+
+wandb:
+  enabled: true
+  project: hand-visibility
+  name: null

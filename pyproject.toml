@@ -12,6 +12,13 @@ dependencies = [
 
 [project.optional-dependencies]
 demo = ["gradio>=4.0", "imageio-ffmpeg>=0.5"]
+train = [
+    "omegaconf>=2.3",
+    "tqdm",
+    "scikit-learn",
+    "wandb",
+    "opencv-python",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -22,3 +29,10 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hand_visibility_detector"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/training",
+    "/assets",
+    "/demo*.py",
+]
