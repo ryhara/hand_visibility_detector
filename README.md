@@ -49,20 +49,6 @@ Gradio UI:
 python demo_gradio.py
 ```
 
-Programmatic:
-
-```python
-import cv2
-from hand_visibility_detector import HandVisibilityPipeline, draw_detections
-
-pipe = HandVisibilityPipeline(device="cuda")
-image = cv2.cvtColor(cv2.imread("image.jpg"), cv2.COLOR_BGR2RGB)
-
-for det in pipe.predict(image):
-    side = "Right" if det.is_right else "Left"
-    print(side, det.bbox_conf, det.visibility.tolist())
-```
-
 ## Dataset
 
 - [COCO-WholeBody Dataset](https://github.com/jin-s13/COCO-WholeBody)
