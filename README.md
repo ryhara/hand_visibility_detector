@@ -5,6 +5,8 @@ Given an RGB image, the pipeline detects both hands and predicts a visibility sc
 
 Pretrained weights are hosted on HuggingFace Hub: **[ryhara/hand-visibility-detector](https://huggingface.co/ryhara/hand-visibility-detector)**
 
+![sample.png](assets/sample.png)
+
 ## Update
 - [x] 2026/04/17 add training code
 - [x] 2026/04/17 publish to github
