@@ -3,8 +3,8 @@
 Per-keypoint hand visibility detection built on top of [WiLoR-mini](https://github.com/warmshao/WiLoR-mini).
 Given an RGB image, the pipeline detects both hands and predicts a visibility score for each of the 21 MANO keypoints.
 
-Pretrained weights are hosted on HuggingFace Hub: **[ryhara/hand-visibility-detector](https://huggingface.co/ryhara/hand-visibility-detector)**
-
+[![Demo](https://img.shields.io/badge/🤗%20Demo-hand--visibility--detector-blue)](https://huggingface.co/spaces/ryhara/hand-visibility-detector)
+[![Model](https://img.shields.io/badge/🤗%20Model-ryhara%2Fhand--visibility--detector-yellow)](https://huggingface.co/ryhara/hand-visibility-detector)
 ![sample.png](assets/sample.png)
 
 ## Update
