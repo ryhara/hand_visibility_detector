@@ -21,3 +21,6 @@ wheels/
 runs/
 *.log
 wandb/
+hint_yolo/
+wilor_cache/
+*.pt

@@ -8,6 +8,7 @@ dependencies = [
     "wilor-mini @ git+https://github.com/warmshao/WiLoR-mini",
     "huggingface-hub>=0.20",
     "dill",
+    "numpy<2",
 ]
 
 [project.optional-dependencies]

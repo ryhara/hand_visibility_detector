@@ -67,7 +67,7 @@ python -m training.train --config training/configs/coco.yaml
 
 # Override any field via dotted OmegaConf args, e.g.
 python -m training.train --config training/configs/hint.yaml \
-    data.hint_root=/mnt/ssd2/HInt_annotation_partial \
+    data.hint_root=/path/to/HInt_annotation_partial \
     train.out_dir=runs/hint_run1 \
     wandb.enabled=false
 ```
