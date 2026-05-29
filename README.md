@@ -8,6 +8,7 @@ Given an RGB image, the pipeline detects both hands and predicts a visibility sc
 ![sample.png](assets/sample.png)
 
 ## Update
+- [x] 2026/05/28 add YOLO fine-tuning code (`training/yolo_finetune/`)
 - [x] 2026/04/17 add training code
 - [x] 2026/04/17 publish to github
 

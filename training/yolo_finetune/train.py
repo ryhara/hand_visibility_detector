@@ -175,15 +175,17 @@ def main() -> None:
     weights_path = resolve_pretrained(args.weights, args.cache_dir)
     print(f"initial weights: {weights_path}")
 
+    wandb_run_id: str | None = None
     if args.wandb:
         ultra_settings.update({"wandb": True})
-        wandb.init(
+        run = wandb.init(
             project=args.wandb_project,
             name=args.wandb_name or args.name,
             entity=args.wandb_entity,
             config=vars(args),
             resume="allow" if args.resume else None,
         )
+        wandb_run_id = run.id if run is not None else None
 
     model = YOLO(weights_path)
 
@@ -231,12 +233,12 @@ def main() -> None:
     print(f"best weights: {best}")
 
     if args.skip_test:
-        if args.wandb:
+        if args.wandb and wandb.run is not None:
             wandb.finish()
         return
     if not best.exists():
         print(f"[warn] best.pt not found at {best}; skipping test eval.")
-        if args.wandb:
+        if args.wandb and wandb.run is not None:
             wandb.finish()
         return
 
@@ -277,6 +279,18 @@ def main() -> None:
             for k in results["finetuned"]:
                 if k in results["baseline"]:
                     flat[f"test/delta/{k}"] = results["finetuned"][k] - results["baseline"][k]
+        # Ultralytics' built-in W&B callback calls wandb.finish() at the end of
+        # training, so wandb.run is None here. Resume the same run to attach the
+        # test metrics to it.
+        if wandb.run is None and wandb_run_id is not None:
+            # resume="must": 既存runに追記。同じrun_idなのでサーバ上の
+            # 学習中metrics/config/summaryはそのまま保持される(初期化されない)。
+            wandb.init(
+                project=args.wandb_project,
+                entity=args.wandb_entity,
+                id=wandb_run_id,
+                resume="must",
+            )
         wandb.log(flat)
         wandb.finish()
 
