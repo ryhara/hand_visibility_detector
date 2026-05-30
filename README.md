@@ -37,6 +37,7 @@ cd hand_visibility_detector
 uv sync                  # base deps
 uv sync --extra demo     # + Gradio demo deps
 uv sync --extra train    # + training deps (omegaconf, tqdm, scikit-learn, wandb, opencv-python)
+uv sync --all-extras     # + all extras (demo + train)
 ```
 
 ## Demo
