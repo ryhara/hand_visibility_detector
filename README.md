@@ -96,7 +96,7 @@ python -m training.train --config training/configs/hint.yaml \
 
 - [HInt Dataset](https://github.com/ddshan/hint)
     ```bash
-    curl -LO https://fouheylab.eecs.umich.edu/~dandans/projects/hammer/HInt_annotation_partial.zip
+    wget --no-check-certificate https://fouheylab.eecs.umich.edu/~dandans/projects/hamer/HInt_annotation_partial.zip
     ```
 
     *: I don't use the ego4d dataset. Because we need to download the ego4d dataset from the official website. Check the [HInt Dataset](https://github.com/ddshan/hint) for more details.
