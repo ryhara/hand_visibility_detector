@@ -9,13 +9,15 @@
 
 data:
   type: hint
-  hint_root: /path/to/HInt_annotation_partial
+  hint_root: /path/to/HInt_annotation
   train_subsets:
+    - TRAIN_ego4d_img
     - TRAIN_newdays_img
     - TRAIN_epick_img
     - VAL_newdays_img
     - VAL_epick_img
   val_subsets:
+    - TEST_ego4d_img
     - TEST_newdays_img
     - TEST_epick_img
   crop_size: 256            # WiLoR wrapper auto-center-crops 256 -> 192 on the width axis
@@ -55,9 +57,9 @@ model:
   hidden_dim: 256
 
 train:
-  epochs: 150
-  batch_size: 64
-  grad_accum_steps: 4
+  epochs: 100
+  batch_size: 256
+  grad_accum_steps: 1
   lr: 1.0e-3
   weight_decay: 0.05
   warmup_epochs: 3
