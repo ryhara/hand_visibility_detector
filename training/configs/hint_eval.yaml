@@ -1,0 +1,49 @@
+# Evaluate trained HandVisibilityNet checkpoints on the HInt hand val subsets.
+#
+#   python -m training.evaluate --config training/configs/eval.yaml
+#
+# Each ``models`` entry is one checkpoint. ``name`` is the output subdir /
+# file prefix; the model architecture (hidden_dim / head-only) is read from the
+# checkpoint's own saved ``config``, so only the checkpoint path is required.
+
+data:
+  type: hint
+  hint_root: /path/to/HInt_annotation
+  val_subsets:
+    - TEST_ego4d_img
+    - TEST_newdays_img
+    - TEST_epick_img
+  crop_size: 256            # WiLoR wrapper auto-center-crops 256 -> 192 on the width axis
+  bbox_expand: 1.25
+  min_bbox_side: 20
+
+models:
+  - name: hint
+    checkpoint: runs/hint/ckpt/best.pt
+
+batch_size: 256
+num_workers: 8
+
+output:
+  dir: outputs/eval
+  metrics:
+    enabled: true
+    save: true
+    types:
+      - accuracy
+      - mAP
+      - f1
+      - precision
+      - recall
+      - roc_auc
+      - pr_auc
+  pr_curves:
+    enabled: true
+    save: true
+  roc_curves:
+    enabled: true
+    save: true
+  visualizations:
+    enabled: true
+    save: true
+    n_samples: 10

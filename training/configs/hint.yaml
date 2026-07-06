@@ -71,7 +71,8 @@ train:
   out_dir: runs/hint
   seed: 0
   log_every: 50
-  val_every_epoch: 2
+  val_every_epoch: 1
+  val_vis_samples: 10       # GT-vs-Pred visibility panels logged to W&B each val
 
 wandb:
   enabled: true

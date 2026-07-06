@@ -1,0 +1,53 @@
+# Evaluate trained HandVisibilityNet checkpoints on COCO-WholeBody hand val.
+#
+#   python -m training.evaluate --config training/configs/eval_coco.yaml
+#
+# COCO-WholeBody visibility flags (v in {0, 1, 2}):
+#   v == 0  -> not labeled  (mask=0, target ignored)
+#   v == 1  -> labeled, occluded -> target=0
+#   v == 2  -> labeled, visible  -> target=1
+
+data:
+  type: cocowholebody
+  coco_root: /path/to/COCO-WholeBody
+  val_ann:     ${data.coco_root}/annotations/coco_wholebody_val_v1.0.json
+  val_img_dir: ${data.coco_root}/val2017
+  # COCO has no per-subset split; a single entry drives one pass over val.
+  # The subset name is only used as an output label (build_val_dataset ignores
+  # it for cocowholebody and always reads val_ann / val_img_dir).
+  val_subsets:
+    - coco_val
+  crop_size: 256            # WiLoR wrapper auto-center-crops 256 -> 192 on the width axis
+  bbox_expand: 1.25
+  min_bbox_side: 20
+
+models:
+  - name: coco
+    checkpoint: runs/coco/ckpt/best.pt
+
+batch_size: 256
+num_workers: 8
+
+output:
+  dir: outputs/eval_coco
+  metrics:
+    enabled: true
+    save: true
+    types:
+      - accuracy
+      - mAP
+      - f1
+      - precision
+      - recall
+      - roc_auc
+      - pr_auc
+  pr_curves:
+    enabled: true
+    save: true
+  roc_curves:
+    enabled: true
+    save: true
+  visualizations:
+    enabled: true
+    save: true
+    n_samples: 10

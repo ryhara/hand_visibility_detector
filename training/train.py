@@ -22,12 +22,16 @@ import os
 import random
 import time
 
+import cv2
 import numpy as np
 import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
+from hand_visibility_detector.transforms import IMAGENET_MEAN, IMAGENET_STD
+from hand_visibility_detector.visualization import HAND_BONES, vis_color
 
 from .dataset import COCOWholeBodyHandDataset, HIntHandDataset
 from .model import build_model
@@ -72,6 +76,31 @@ def compute_metrics(
     return {"acc": accuracy, "mAP": float(mAP), "f1": float(f1)}
 
 
+def compute_pr_curve(
+    logits: np.ndarray,
+    target: np.ndarray,
+    mask: np.ndarray,
+    max_points: int = 300,
+) -> tuple[list[float], list[float]] | None:
+    """Micro-averaged precision-recall curve over all valid (sample, kpt)
+    pairs. Returns ``(recall, precision)`` lists (sub-sampled to
+    ``max_points``), or ``None`` if the curve is undefined."""
+    from sklearn.metrics import precision_recall_curve
+
+    valid = mask > 0.5
+    if valid.sum() < 2:
+        return None
+    probs = (1.0 / (1.0 + np.exp(-logits)))[valid]
+    t = target[valid]
+    if t.sum() == 0 or t.sum() == t.shape[0]:
+        return None
+    precision, recall, _ = precision_recall_curve(t, probs)
+    if len(precision) > max_points:
+        idx = np.linspace(0, len(precision) - 1, max_points).astype(int)
+        precision, recall = precision[idx], recall[idx]
+    return recall.tolist(), precision.tolist()
+
+
 # ---------------------------------------------------------------------------
 # Loss
 # ---------------------------------------------------------------------------
@@ -94,10 +123,18 @@ def evaluate(
     loader: DataLoader,
     device: torch.device,
     pos_weight: torch.Tensor | None,
-) -> dict[str, float]:
+    num_vis: int = 0,
+) -> tuple[dict[str, float], list[tuple[np.ndarray, int]], tuple[list, list] | None]:
+    """Returns ``(metrics, vis_panels, pr_curve)``.
+
+    ``vis_panels`` holds up to ``num_vis`` ``(panel_rgb, image_id)`` GT-vs-Pred
+    visibility images from the first batches (deterministic, since the val
+    loader is unshuffled). ``pr_curve`` is the micro-averaged ``(recall,
+    precision)`` over the whole val set."""
     model.eval()
     all_logits, all_target, all_mask = [], [], []
     losses = []
+    vis_panels: list[tuple[np.ndarray, int]] = []
     for batch in tqdm(loader, desc="val", leave=False):
         img = batch["image"].to(device, non_blocking=True)
         target = batch["target"].to(device, non_blocking=True)
@@ -105,16 +142,38 @@ def evaluate(
         logits = model(img)
         loss = masked_bce(logits, target, mask, pos_weight)
         losses.append(loss.item())
-        all_logits.append(logits.detach().float().cpu().numpy())
+        logits_np = logits.detach().float().cpu().numpy()
+        all_logits.append(logits_np)
         all_target.append(target.cpu().numpy())
         all_mask.append(mask.cpu().numpy())
-    metrics = compute_metrics(
-        np.concatenate(all_logits),
-        np.concatenate(all_target),
-        np.concatenate(all_mask),
-    )
+
+        if num_vis > 0 and len(vis_panels) < num_vis and "kpts_crop" in batch:
+            probs = 1.0 / (1.0 + np.exp(-logits_np))
+            kpts_b = batch["kpts_crop"].cpu().numpy()
+            tgt_b = batch["target"].cpu().numpy()
+            mask_b = batch["mask"].cpu().numpy()
+            img_b = batch["image"].cpu()
+            ids_b = batch["image_id"].cpu().numpy()
+            for i in range(img_b.shape[0]):
+                if len(vis_panels) >= num_vis:
+                    break
+                # Skip images without any labeled visibility/hand keypoints:
+                # nothing would be drawn, so don't visualize or count them.
+                if mask_b[i].max() < 0.5:
+                    continue
+                rgb = _denorm_image(img_b[i])
+                panel = _gt_vs_pred_panel(
+                    rgb, kpts_b[i], tgt_b[i], probs[i], mask_b[i]
+                )
+                vis_panels.append((panel, int(ids_b[i])))
+
+    logits_all = np.concatenate(all_logits)
+    target_all = np.concatenate(all_target)
+    mask_all = np.concatenate(all_mask)
+    metrics = compute_metrics(logits_all, target_all, mask_all)
     metrics["loss"] = float(np.mean(losses))
-    return metrics
+    pr_curve = compute_pr_curve(logits_all, target_all, mask_all)
+    return metrics, vis_panels, pr_curve
 
 
 def estimate_pos_weight(
@@ -168,6 +227,63 @@ def _log(data: dict, step: int) -> None:
         import wandb
 
         wandb.log(data, step=step)
+
+
+# ---------------------------------------------------------------------------
+# Visibility visualization (demo_gradio-style) for W&B
+# ---------------------------------------------------------------------------
+
+
+def _denorm_image(img_tensor: torch.Tensor) -> np.ndarray:
+    """Invert ImageNet normalization: (3, H, W) tensor -> (H, W, 3) uint8 RGB."""
+    img = img_tensor.detach().float().cpu().numpy().transpose(1, 2, 0)
+    img = img * IMAGENET_STD + IMAGENET_MEAN
+    return np.clip(img * 255.0, 0, 255).astype(np.uint8)
+
+
+def _render_visibility(
+    image_rgb: np.ndarray,
+    kpts: np.ndarray,
+    vis: np.ndarray,
+    mask: np.ndarray,
+    title: str,
+) -> np.ndarray:
+    """Draw the 21-kpt skeleton coloured by ``vis`` (0..1; green=visible,
+    red=occluded). Keypoints with ``mask < 0.5`` are skipped."""
+    canvas = image_rgb.copy()
+    pts = kpts.astype(np.int32)
+
+    for a, b in HAND_BONES:
+        if mask[a] < 0.5 or mask[b] < 0.5:
+            continue
+        color = vis_color(float(min(vis[a], vis[b])))
+        cv2.line(canvas, tuple(pts[a]), tuple(pts[b]), color, 2, cv2.LINE_AA)
+    for k in range(len(pts)):
+        if mask[k] < 0.5:
+            continue
+        color = vis_color(float(vis[k]))
+        cv2.circle(canvas, tuple(pts[k]), 4, color, -1, cv2.LINE_AA)
+        cv2.circle(canvas, tuple(pts[k]), 4, (255, 255, 255), 1, cv2.LINE_AA)
+
+    cv2.putText(
+        canvas, title, (6, 20),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2, cv2.LINE_AA,
+    )
+    return canvas
+
+
+def _gt_vs_pred_panel(
+    image_rgb: np.ndarray,
+    kpts: np.ndarray,
+    target: np.ndarray,
+    probs: np.ndarray,
+    mask: np.ndarray,
+) -> np.ndarray:
+    """Side-by-side ``[GT | Pred]`` visibility panel."""
+    gt = _render_visibility(image_rgb, kpts, target, mask, "GT")
+    pred = _render_visibility(image_rgb, kpts, probs, mask, "Pred")
+    sep = np.full((gt.shape[0], 4, 3), 255, dtype=np.uint8)
+    return np.concatenate([gt, sep, pred], axis=1)
 
 
 # ---------------------------------------------------------------------------
@@ -397,7 +513,10 @@ def main() -> None:
         if (epoch + 1) % int(cfg.train.val_every_epoch) == 0 or (
             epoch + 1 == total_epochs
         ):
-            metrics = evaluate(model, val_loader, device, pos_weight)
+            num_vis = int(cfg.train.get("val_vis_samples", 0)) if _USE_WANDB else 0
+            metrics, vis_panels, pr_curve = evaluate(
+                model, val_loader, device, pos_weight, num_vis=num_vis
+            )
             tqdm.write(
                 f"[epoch {epoch}] val_loss={metrics['loss']:.4f} "
                 f"acc={metrics['acc']:.4f} mAP={metrics['mAP']:.4f} "
@@ -407,6 +526,35 @@ def main() -> None:
                 {f"val/{k}": v for k, v in metrics.items()} | {"epoch": epoch},
                 step=global_step,
             )
+            if _USE_WANDB and vis_panels:
+                import wandb
+
+                _log(
+                    {
+                        "val/examples": [
+                            wandb.Image(panel, caption=f"id={img_id}  [GT | Pred]")
+                            for panel, img_id in vis_panels
+                        ]
+                    },
+                    step=global_step,
+                )
+            if _USE_WANDB and pr_curve is not None:
+                import wandb
+
+                recall, precision = pr_curve
+                table = wandb.Table(
+                    data=list(zip(recall, precision)),
+                    columns=["recall", "precision"],
+                )
+                _log(
+                    {
+                        "val/pr_curve": wandb.plot.line(
+                            table, "recall", "precision",
+                            title="Val PR curve (micro-avg)",
+                        )
+                    },
+                    step=global_step,
+                )
 
             model_sd = (
                 model.head_state_dict() if freeze_backbone else model.state_dict()

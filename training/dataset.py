@@ -158,10 +158,15 @@ class COCOWholeBodyHandDataset(Dataset):
         cx, cy, side = expand_square_bbox(np.asarray(s.bbox_xywh), self.bbox_expand)
         if self.train:
             cx, cy, side = jitter_bbox_center(cx, cy, side)
-        patch, _ = crop_square(image_rgb, cx, cy, side, self.crop_size)
+        patch, (x0, y0, scale) = crop_square(image_rgb, cx, cy, side, self.crop_size)
+
+        # Keypoints in crop-pixel coordinates (for visualization). Only valid
+        # when ``train=False`` -- ``augment_train`` warps the patch geometry.
+        kpts_crop = (s.kpts[:, :2] - np.asarray([x0, y0], dtype=np.float32)) * scale
 
         if not s.is_right:
             patch = patch[:, ::-1, :].copy()
+            kpts_crop[:, 0] = (self.crop_size - 1) - kpts_crop[:, 0]
 
         if self.train:
             patch = augment_train(patch, self.augment_cfg)
@@ -171,6 +176,7 @@ class COCOWholeBodyHandDataset(Dataset):
             "image": to_model_tensor(patch),
             "target": torch.from_numpy(target),
             "mask": torch.from_numpy(mask),
+            "kpts_crop": torch.from_numpy(kpts_crop.astype(np.float32)),
             "is_right": torch.tensor(1 if s.is_right else 0, dtype=torch.long),
             "image_id": torch.tensor(s.image_id, dtype=torch.long),
         }
@@ -348,10 +354,15 @@ class HIntHandDataset(Dataset):
         cx, cy, side = expand_square_bbox(bbox_xywh, self.bbox_expand)
         if self.train:
             cx, cy, side = jitter_bbox_center(cx, cy, side)
-        patch, _ = crop_square(image_rgb, cx, cy, side, self.crop_size)
+        patch, (x0, y0, scale) = crop_square(image_rgb, cx, cy, side, self.crop_size)
+
+        # Keypoints in crop-pixel coordinates (for visualization). Only valid
+        # when ``train=False`` -- ``augment_train`` warps the patch geometry.
+        kpts_crop = (s.kpts[:, :2] - np.asarray([x0, y0], dtype=np.float32)) * scale
 
         if not s.is_right:
             patch = patch[:, ::-1, :].copy()
+            kpts_crop[:, 0] = (self.crop_size - 1) - kpts_crop[:, 0]
 
         if self.train:
             patch = augment_train(patch, self.augment_cfg)
@@ -362,6 +373,7 @@ class HIntHandDataset(Dataset):
             "image": to_model_tensor(patch),
             "target": torch.from_numpy(target),
             "mask": torch.from_numpy(mask),
+            "kpts_crop": torch.from_numpy(kpts_crop.astype(np.float32)),
             "is_right": torch.tensor(1 if s.is_right else 0, dtype=torch.long),
             "image_id": torch.tensor(image_id, dtype=torch.long),
         }

@@ -18,6 +18,7 @@ train = [
     "scikit-learn",
     "wandb",
     "opencv-python",
+    "matplotlib",
 ]
 
 [build-system]
