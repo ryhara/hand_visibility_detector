@@ -8,6 +8,7 @@ Given an RGB image, the pipeline detects both hands and predicts a visibility sc
 ![sample.png](assets/sample.png)
 
 ## Update
+- [x] 2026/07/06 use ego4d data
 - [x] 2026/04/17 add training code
 - [x] 2026/04/17 publish to github
 
@@ -36,6 +37,7 @@ cd hand_visibility_detector
 uv sync                  # base deps
 uv sync --extra demo     # + Gradio demo deps
 uv sync --extra train    # + training deps (omegaconf, tqdm, scikit-learn, wandb, opencv-python)
+uv sync --all-extras     # all extras
 ```
 
 ## Demo
@@ -99,10 +101,10 @@ python -m training.train --config training/configs/hint.yaml \
     wget --no-check-certificate https://fouheylab.eecs.umich.edu/~dandans/projects/hamer/HInt_annotation_partial.zip
     ```
 
-    *: I don't use the ego4d dataset. Because we need to download the ego4d dataset from the official website. Check the [HInt Dataset](https://github.com/ddshan/hint) for more details.
+    *: we need to download the ego4d dataset from the official website. Check the [HInt Dataset](https://github.com/ddshan/hint) for more details.
 
     ```bash
-    HInt_annotation_partial/
+    HInt_annotation/
     ├── TEST_ego4d_img*
     ├── TEST_ego4d_seq*
     ├── TEST_epick_img
