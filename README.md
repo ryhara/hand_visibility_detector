@@ -43,7 +43,7 @@ uv sync --all-extras     # all extras
 
 ## Demo
 
-CLI:
+Image:
 
 ```bash
 python demo.py path/to/image.jpg -o output.jpg
@@ -51,6 +51,12 @@ python demo.py path/to/image.jpg -o output.jpg
 - `--hand-conf`: hand detection confidence threshold
 - `--show-global-orient`: wrist rotation visualization
 - `--show-hand-pose`: per-joint rotation visualization
+
+Video:
+
+```bash
+python demo_video.py path/to/video.mp4 -o output.mp4
+```
 
 Gradio UI:
 
