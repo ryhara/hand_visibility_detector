@@ -8,6 +8,7 @@ Given an RGB image, the pipeline detects both hands and predicts a visibility sc
 ![sample.png](assets/sample.png)
 
 ## Update
+- [x] 2026/07/09 add demo_video.py, add joint rotation visualization
 - [x] 2026/07/06 use ego4d data, fix training code, add evaluation code
 - [x] 2026/04/17 add training code
 - [x] 2026/04/17 publish to github
@@ -47,6 +48,9 @@ CLI:
 ```bash
 python demo.py path/to/image.jpg -o output.jpg
 ```
+- `--hand-conf`: hand detection confidence threshold
+- `--show-global-orient`: wrist rotation visualization
+- `--show-hand-pose`: per-joint rotation visualization
 
 Gradio UI:
 

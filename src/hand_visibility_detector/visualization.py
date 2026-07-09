@@ -7,6 +7,14 @@ from typing import TYPE_CHECKING
 import cv2
 import numpy as np
 
+from .rotations import (
+    FINGERTIP_KEYPOINTS,
+    FINGERTIP_PARENT_JOINTS,
+    MANO_TO_KEYPOINT,
+    axis_angle_to_matrix,
+    cumulative_joint_rotations,
+)
+
 if TYPE_CHECKING:
     from .pipeline import HandResult
 
@@ -19,6 +27,32 @@ HAND_BONES = [
     (0, 13), (13, 14), (14, 15), (15, 16),  # ring
     (0, 17), (17, 18), (18, 19), (19, 20),  # pinky
 ]
+
+
+# Axis colors (RGB): x=red, y=green, z=blue.
+AXIS_COLORS = [(255, 60, 60), (60, 220, 60), (80, 120, 255)]
+
+
+def draw_rotation_axes(
+    canvas: np.ndarray,
+    origin: tuple[float, float],
+    rotmat: np.ndarray,
+    length: float,
+    thickness: int = 2,
+) -> None:
+    """Draw a rotated coordinate frame at ``origin`` (orthographic projection).
+
+    The columns of ``rotmat`` are the frame's x/y/z axes in camera space;
+    their (x, y) components are drawn directly in image space.
+    """
+    ox, oy = int(origin[0]), int(origin[1])
+    for j in range(3):
+        dx = int(rotmat[0, j] * length)
+        dy = int(rotmat[1, j] * length)
+        cv2.line(
+            canvas, (ox, oy), (ox + dx, oy + dy),
+            AXIS_COLORS[j], thickness, cv2.LINE_AA,
+        )
 
 
 def vis_color(v: float) -> tuple[int, int, int]:
@@ -34,11 +68,13 @@ def draw_detections(
     results: list["HandResult"],
     show_bones: bool = True,
     show_conf: bool = True,
+    show_global_orient: bool = False,
+    show_hand_pose: bool = False,
 ) -> np.ndarray:
     """Draw all detected hands on the original image.
 
     Draws bounding boxes, 2D keypoint skeletons coloured by visibility,
-    and optionally the detection confidence.
+    and optionally the detection confidence and MANO rotations.
 
     Parameters
     ----------
@@ -46,6 +82,12 @@ def draw_detections(
     results : List of :class:`HandResult` from the pipeline.
     show_bones : Whether to draw skeleton bones.
     show_conf : Whether to show bbox confidence text.
+    show_global_orient : Draw the wrist coordinate frame (global_orient)
+        and its (roll, pitch, yaw) text. Requires results predicted with
+        ``return_rotations=True``.
+    show_hand_pose : Draw a small camera-space coordinate frame at each
+        MANO joint (hand_pose composed along the kinematic chain).
+        Requires results predicted with ``return_rotations=True``.
 
     Returns
     -------
@@ -93,5 +135,29 @@ def draw_detections(
                 center = (int(kpts[k, 0]), int(kpts[k, 1]))
                 cv2.circle(canvas, center, 4, color, -1, cv2.LINE_AA)
                 cv2.circle(canvas, center, 4, (255, 255, 255), 1, cv2.LINE_AA)
+
+        bbox_size = max(x2 - x1, y2 - y1)
+
+        if show_hand_pose and res.hand_pose is not None and kpts is not None:
+            joint_rots = cumulative_joint_rotations(
+                res.global_orient, res.hand_pose
+            )
+            axis_len = max(6.0, bbox_size * 0.06)
+            for j, k in enumerate(MANO_TO_KEYPOINT):
+                draw_rotation_axes(
+                    canvas, (kpts[k, 0], kpts[k, 1]), joint_rots[j],
+                    axis_len, thickness=1,
+                )
+            # Fingertips inherit the distal phalanx orientation.
+            for j, k in zip(FINGERTIP_PARENT_JOINTS, FINGERTIP_KEYPOINTS):
+                draw_rotation_axes(
+                    canvas, (kpts[k, 0], kpts[k, 1]), joint_rots[j],
+                    axis_len, thickness=1,
+                )
+
+        if show_global_orient and res.global_orient is not None and kpts is not None:
+            rotmat = axis_angle_to_matrix(res.global_orient)
+            axis_len = max(12.0, bbox_size * 0.2)
+            draw_rotation_axes(canvas, (kpts[0, 0], kpts[0, 1]), rotmat, axis_len)
 
     return canvas

@@ -8,7 +8,14 @@ _warnings.filterwarnings("ignore", message=r".*timm\.models\.layers.*", category
 _warnings.filterwarnings("ignore", message=r".*align=0.*")
 
 from .pipeline import HandResult, HandVisibilityPipeline
-from .visualization import draw_detections, vis_color
+from .rotations import (
+    axis_angle_to_euler,
+    axis_angle_to_matrix,
+    cumulative_joint_rotations,
+    fingertip_rotations,
+    matrix_to_euler,
+)
+from .visualization import draw_detections, draw_rotation_axes, vis_color
 
 __version__ = "0.1.0"
 
@@ -16,5 +23,11 @@ __all__ = [
     "HandVisibilityPipeline",
     "HandResult",
     "draw_detections",
+    "draw_rotation_axes",
     "vis_color",
+    "axis_angle_to_euler",
+    "axis_angle_to_matrix",
+    "matrix_to_euler",
+    "cumulative_joint_rotations",
+    "fingertip_rotations",
 ]

@@ -17,6 +17,7 @@ from wilor_mini.pipelines.wilor_hand_pose3d_estimation_pipeline import (
 from wilor_mini.utils import utils as wilor_utils
 
 from .hub import download_checkpoint
+from .rotations import axis_angle_to_euler
 from .transforms import (
     crop_square,
     expand_square_bbox,
@@ -58,6 +59,22 @@ class HandResult:
 
     wilor_preds: dict = field(default_factory=dict, repr=False)
     """Raw WiLoR output dictionary (for advanced usage)."""
+
+    global_orient: np.ndarray | None = None
+    """(3,) MANO global (wrist) orientation as axis-angle in camera space.
+    Only populated when ``return_rotations`` is enabled."""
+
+    global_orient_euler: np.ndarray | None = None
+    """(3,) global orientation as (roll, pitch, yaw) in degrees.
+    Only populated when ``return_rotations`` is enabled."""
+
+    hand_pose: np.ndarray | None = None
+    """(15, 3) MANO per-joint pose as axis-angle, relative to each parent joint.
+    Only populated when ``return_rotations`` is enabled."""
+
+    hand_pose_euler: np.ndarray | None = None
+    """(15, 3) per-joint pose as (roll, pitch, yaw) in degrees.
+    Only populated when ``return_rotations`` is enabled."""
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +226,7 @@ class HandVisibilityPipeline:
         hand_conf: float = 0.3,
         bbox_expand: float = 1.25,
         crop_size: int = 256,
+        return_rotations: bool = False,
     ) -> None:
         if isinstance(device, str):
             device = torch.device(device)
@@ -217,6 +235,7 @@ class HandVisibilityPipeline:
         self.hand_conf = hand_conf
         self.bbox_expand = bbox_expand
         self.crop_size = crop_size
+        self.return_rotations = return_rotations
 
         # 1. WiLoR pipeline (with confidence). Swallow the MANO `print` banner
         #    emitted by smplx during initialization.
@@ -239,17 +258,27 @@ class HandVisibilityPipeline:
         )
         self._vis_model.to(device).eval()
 
-    def predict(self, image: np.ndarray) -> list[HandResult]:
+    def predict(
+        self,
+        image: np.ndarray,
+        return_rotations: bool | None = None,
+    ) -> list[HandResult]:
         """Run detection + visibility on a single RGB image.
 
         Parameters
         ----------
         image : (H, W, 3) uint8 RGB image.
+        return_rotations : If ``True``, populate ``global_orient`` /
+            ``hand_pose`` (axis-angle) and their (roll, pitch, yaw) Euler
+            counterparts on each result. Defaults to the value passed at
+            construction time.
 
         Returns
         -------
         List of :class:`HandResult`, one per detected hand.
         """
+        if return_rotations is None:
+            return_rotations = self.return_rotations
         detections = self._wilor_pipe.predict(image, hand_conf=self.hand_conf)
         if not detections:
             return []
@@ -281,6 +310,13 @@ class HandVisibilityPipeline:
         results: list[HandResult] = []
         for i, det in enumerate(valid_dets):
             wp = det["wilor_preds"]
+            global_orient = global_orient_euler = None
+            hand_pose = hand_pose_euler = None
+            if return_rotations:
+                global_orient = wp["global_orient"].reshape(3).copy()
+                hand_pose = wp["hand_pose"].reshape(-1, 3).copy()
+                global_orient_euler = axis_angle_to_euler(global_orient)
+                hand_pose_euler = axis_angle_to_euler(hand_pose)
             results.append(
                 HandResult(
                     hand_bbox=det["hand_bbox"],
@@ -290,6 +326,10 @@ class HandVisibilityPipeline:
                     keypoints_3d=wp["pred_keypoints_3d"][0],
                     visibility=vis_probs[i],
                     wilor_preds=wp,
+                    global_orient=global_orient,
+                    global_orient_euler=global_orient_euler,
+                    hand_pose=hand_pose,
+                    hand_pose_euler=hand_pose_euler,
                 )
             )
 
