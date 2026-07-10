@@ -16,7 +16,7 @@ from wilor_mini.pipelines.wilor_hand_pose3d_estimation_pipeline import (
 )
 from wilor_mini.utils import utils as wilor_utils
 
-from .hub import download_checkpoint
+from .hub import default_checkpoint_for_backbone
 from .rotations import axis_angle_to_euler
 from .transforms import (
     crop_square,
@@ -206,13 +206,46 @@ class _WiLorWithConf(WiLorHandPose3dEstimationPipeline):
 # ---------------------------------------------------------------------------
 
 
+def _fresh_wilor_backbone() -> torch.nn.Module:
+    """Build a random-initialised WiLoR ViT backbone (for checkpoints that
+    contain fine-tuned backbone weights). Only ``mano_mean_params.npz`` is
+    fetched from the Hub -- not the full WiLoR checkpoint."""
+    import os
+
+    import wilor_mini
+    from wilor_mini.models.vit import vit
+
+    pretrained_dir = os.path.join(
+        os.path.dirname(wilor_mini.__file__), "pretrained_models"
+    )
+    path = os.path.join(pretrained_dir, "mano_mean_params.npz")
+    if not os.path.exists(path):
+        from huggingface_hub import hf_hub_download
+
+        hf_hub_download(
+            repo_id="warmshao/WiLoR-mini",
+            subfolder="pretrained_models",
+            filename="mano_mean_params.npz",
+            local_dir=os.path.dirname(wilor_mini.__file__),
+        )
+    return vit(mano_mean_path=path)
+
+
 class HandVisibilityPipeline:
     """End-to-end hand detection, 3D pose estimation, and per-keypoint
     visibility prediction.
 
+    The visibility backbone (``wilor`` / ``hamer`` / ``resnet*`` / ``vit_*`` /
+    ``cspnext_*``) is read from the checkpoint's saved config. Published
+    checkpoints exist for ``wilor`` (``best.pt``) and ``hamer``
+    (``best_hamer.pt``) and are auto-downloaded; any other backbone needs an
+    explicit ``vis_checkpoint`` path to your own trained checkpoint.
+
     Example
     -------
-    >>> pipe = HandVisibilityPipeline(device="cuda")
+    >>> pipe = HandVisibilityPipeline(device="cuda")            # WiLoR backbone
+    >>> pipe = HandVisibilityPipeline(device="cuda", backbone="hamer")
+    >>> pipe = HandVisibilityPipeline(device="cuda", vis_checkpoint="runs/.../best.pt")
     >>> results = pipe.predict(image_rgb)
     >>> for r in results:
     ...     print(r.is_right, r.bbox_conf, r.visibility)
@@ -227,7 +260,24 @@ class HandVisibilityPipeline:
         bbox_expand: float = 1.25,
         crop_size: int = 256,
         return_rotations: bool = False,
+        backbone: str | None = None,
+        backbone_weights: str | None = None,
     ) -> None:
+        """
+        Parameters
+        ----------
+        vis_checkpoint : Path to a trained visibility checkpoint. When ``None``
+            the published checkpoint for ``backbone`` is downloaded from
+            HuggingFace Hub (only available for ``wilor`` and ``hamer``).
+        backbone : Which published checkpoint to fetch when ``vis_checkpoint``
+            is ``None`` (``"wilor"``, the default, or ``"hamer"``). The actual
+            model architecture is always rebuilt from the checkpoint's own
+            saved config.
+        backbone_weights : Optional local path to the backbone's pre-trained
+            weights, used by head-only checkpoints of the ``hamer`` backbone
+            (the published ``hamer.ckpt``; resolved via ``HAMER_WEIGHTS`` or
+            auto-downloaded from the official HaMeR Space when omitted).
+        """
         if isinstance(device, str):
             device = torch.device(device)
         self.device = device
@@ -244,18 +294,58 @@ class HandVisibilityPipeline:
                 device=device, dtype=dtype, verbose=False,
             )
 
-        # 2. Visibility network (share WiLoR backbone)
+        # 2. Visibility network. The architecture (backbone / hidden_dim) is
+        #    rebuilt from the checkpoint's saved config.
         if vis_checkpoint is None:
-            vis_checkpoint = download_checkpoint()
+            vis_checkpoint = default_checkpoint_for_backbone(backbone or "wilor")
         ckpt = torch.load(vis_checkpoint, map_location="cpu", weights_only=False)
-        head_sd = ckpt["model"]
+        state_dict = ckpt["model"]
         cfg = ckpt.get("config", {}).get("model", {})
+        backbone_name = str(cfg.get("backbone", "wilor")).lower()
+        if backbone is not None and backbone.lower() != backbone_name:
+            logger.warning(
+                "backbone=%r was requested but the checkpoint was trained with "
+                "backbone=%r; using the checkpoint's backbone.",
+                backbone, backbone_name,
+            )
+        hidden_dim = int(cfg.get("hidden_dim", 256))
+        # head_only=True: the checkpoint holds only head weights, so the
+        # backbone must be built with its own pre-trained weights. Otherwise the
+        # checkpoint holds the full (fine-tuned) model state.
+        head_only = bool(ckpt.get("head_only", True))
 
-        self._vis_model = HandVisibilityNet.from_wilor_backbone(
-            raw_backbone=self._wilor_pipe.wilor_model.backbone,
-            head_state_dict=head_sd,
-            hidden_dim=cfg.get("hidden_dim", 256),
-        )
+        if backbone_name == "wilor":
+            if head_only:
+                # Share the (frozen, pre-trained) WiLoR backbone with the pose
+                # pipeline.
+                raw_backbone = self._wilor_pipe.wilor_model.backbone
+            else:
+                # The checkpoint carries fine-tuned backbone weights: use a
+                # separate backbone so the pose pipeline's weights stay intact.
+                raw_backbone = _fresh_wilor_backbone()
+            self._vis_model = HandVisibilityNet(
+                raw_backbone=raw_backbone,
+                hidden_dim=hidden_dim,
+                freeze_backbone=True,
+            )
+        else:
+            from .backbones import build_backbone
+
+            bb_kwargs = {}
+            if backbone_weights is not None:
+                bb_kwargs["weights"] = backbone_weights
+            bb = build_backbone(backbone_name, pretrained=head_only, **bb_kwargs)
+            self._vis_model = HandVisibilityNet(
+                backbone=bb,
+                feat_dim=bb.feat_dim,
+                hidden_dim=hidden_dim,
+                freeze_backbone=True,
+            )
+
+        if head_only:
+            self._vis_model.load_head_state_dict(state_dict)
+        else:
+            self._vis_model.load_state_dict(state_dict)
         self._vis_model.to(device).eval()
 
     def predict(

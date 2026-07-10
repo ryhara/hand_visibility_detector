@@ -47,6 +47,10 @@ data:
       p: 0.2
 
 model:
+  # wilor | resnet18/34/50/101/152 | vit_b_16/b_32/l_16/l_32/h_14 | hamer
+  # | cspnext_tiny/s/m/l/x
+  backbone: wilor
+  pretrained: true
   freeze_backbone: true
   dropout: 0.1
   hidden_dim: 256

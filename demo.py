@@ -24,6 +24,7 @@ def main() -> None:
     parser.add_argument("--device", default="cuda", help="Device (cuda or cpu)")
     parser.add_argument("--hand-conf", type=float, default=0.5, help="Hand detection confidence threshold")
     parser.add_argument("--checkpoint", default=None, help="Path to visibility checkpoint (auto-downloads if omitted)")
+    parser.add_argument("--backbone", default=None, help="Published checkpoint to auto-download when --checkpoint is omitted (wilor or hamer)")
     parser.add_argument("--show-global-orient", action="store_true", help="Visualize global_orient (wrist axes + roll/pitch/yaw text)")
     parser.add_argument("--show-hand-pose", action="store_true", help="Visualize hand_pose (per-joint rotation axes)")
     args = parser.parse_args()
@@ -42,6 +43,7 @@ def main() -> None:
         device=device,
         dtype=dtype,
         vis_checkpoint=args.checkpoint,
+        backbone=args.backbone,
         hand_conf=args.hand_conf,
     )
 

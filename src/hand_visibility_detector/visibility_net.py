@@ -115,25 +115,43 @@ class VisibilityHead(nn.Module):
 
 
 class HandVisibilityNet(nn.Module):
-    """Contact4D-style hand-keypoint visibility classifier (WiLoR backbone).
+    """Contact4D-style hand-keypoint visibility classifier.
 
-    Pass a raw WiLoR ViT backbone (from ``wilor_mini``) and this module wraps
-    it with the RTMPose-style visibility head. Use
-    :meth:`from_wilor_backbone` for inference with a pre-trained head.
+    Either pass a raw WiLoR ViT backbone (from ``wilor_mini``; wrapped here and
+    sized to ``WILOR_FEAT_DIM``) via ``raw_backbone``, or a generic feature-map
+    backbone (see :mod:`hand_visibility_detector.backbones`) via ``backbone``
+    whose ``forward`` returns ``(B, C, H, W)``; its ``feat_dim`` (``C``) is read
+    from the module or given explicitly. Use :meth:`from_wilor_backbone` /
+    :meth:`from_backbone` for inference with a pre-trained head.
     """
 
     def __init__(
         self,
-        raw_backbone: nn.Module,
+        raw_backbone: nn.Module | None = None,
         dropout: float = 0.0,
         hidden_dim: int = 256,
         num_keypoints: int = NUM_HAND_KEYPOINTS,
         freeze_backbone: bool = False,
+        backbone: nn.Module | None = None,
+        feat_dim: int | None = None,
     ) -> None:
         super().__init__()
-        self.backbone = _WiLoRBackboneWrapper(raw_backbone)
+        if raw_backbone is not None:
+            self.backbone = _WiLoRBackboneWrapper(raw_backbone)
+            feat_dim = WILOR_FEAT_DIM
+        elif backbone is not None:
+            self.backbone = backbone
+            if feat_dim is None:
+                feat_dim = getattr(backbone, "feat_dim", None)
+            if feat_dim is None:
+                raise ValueError(
+                    "feat_dim must be given (or set as backbone.feat_dim) "
+                    "when passing a generic backbone"
+                )
+        else:
+            raise ValueError("provide either raw_backbone or backbone")
         self.head = VisibilityHead(
-            in_channels=WILOR_FEAT_DIM,
+            in_channels=feat_dim,
             hidden_dim=hidden_dim,
             num_keypoints=num_keypoints,
         )
@@ -155,6 +173,27 @@ class HandVisibilityNet(nn.Module):
         """Build a frozen-backbone model and load the pre-trained head."""
         model = cls(
             raw_backbone=raw_backbone,
+            hidden_dim=hidden_dim,
+            num_keypoints=num_keypoints,
+            freeze_backbone=True,
+        )
+        model.head.load_state_dict(head_state_dict, strict=True)
+        return model
+
+    @classmethod
+    def from_backbone(
+        cls,
+        backbone: nn.Module,
+        head_state_dict: dict,
+        feat_dim: int | None = None,
+        hidden_dim: int = 256,
+        num_keypoints: int = NUM_HAND_KEYPOINTS,
+    ) -> "HandVisibilityNet":
+        """Build a frozen-backbone model from a generic feature-map backbone
+        and load the pre-trained head."""
+        model = cls(
+            backbone=backbone,
+            feat_dim=feat_dim,
             hidden_dim=hidden_dim,
             num_keypoints=num_keypoints,
             freeze_backbone=True,

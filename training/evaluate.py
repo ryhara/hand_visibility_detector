@@ -196,6 +196,10 @@ def load_model(checkpoint: str, device: torch.device) -> torch.nn.Module:
     mcfg = ckpt.get("config", {}).get("model", {})
     head_only = bool(ckpt.get("head_only", False))
     model = build_model(
+        backbone=str(mcfg.get("backbone", "wilor")),
+        # Head-only checkpoints rely on the backbone's own pre-trained weights;
+        # full checkpoints overwrite them anyway.
+        pretrained=head_only,
         dropout=float(mcfg.get("dropout", 0.0)),
         hidden_dim=int(mcfg.get("hidden_dim", 256)),
         freeze_backbone=bool(mcfg.get("freeze_backbone", head_only)),

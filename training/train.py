@@ -385,11 +385,15 @@ def main() -> None:
 
     # ── Model / optim ─────────────────────────────────────────────────────
     freeze_backbone = bool(cfg.model.get("freeze_backbone", False))
+    backbone_name = str(cfg.model.get("backbone", "wilor"))
     model = build_model(
+        backbone=backbone_name,
+        pretrained=bool(cfg.model.get("pretrained", True)),
         dropout=float(cfg.model.dropout),
         hidden_dim=int(cfg.model.get("hidden_dim", 256)),
         freeze_backbone=freeze_backbone,
     ).to(device)
+    print(f"backbone: {backbone_name}   freeze_backbone: {freeze_backbone}")
 
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     if freeze_backbone:
