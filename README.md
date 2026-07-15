@@ -166,3 +166,5 @@ If you use this software, please cite it as:
   version = {0.1.0}
 }
 ```
+
+[![Star History Chart](https://api.star-history.com/chart?repos=ryhara/hand_visibility_detector&type=date&legend=top-left&sealed_token=7bLXSOm0Asqh73hv5dGs0k-M0kPKZhpH9f9mRyaHgS2lSkMhAyPHJ6DdGbO0Mo2CXVsjBxgtTAulFmK9zrfwmSOplytlJbDFHLO0EcrvftfVhqCuYfMB0QoB2ewTtvoh_4Nd1oLFY9W9AcqUQVAlzSnxC0vF2uuV2oWX1MRnAQXE8o77-FvA_s80re4J)](https://www.star-history.com/?repos=ryhara%2Fhand_visibility_detector&type=date&legend=top-left)
