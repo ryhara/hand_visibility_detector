@@ -147,11 +147,12 @@ python -m training.evaluate --config training/configs/hint_eval.yaml \
 
 This project is released for **research and non-commercial use only**, inheriting the most restrictive terms of its upstream dependencies. Any use of this code, weights, or derivatives must comply with **all** of the following:
 
-- **[COCO-WholeBody](https://github.com/jin-s13/COCO-WholeBody)**
-- **[HInt](https://github.com/ddshan/hint)**
-- **[WiLoR](https://github.com/rolpotamias/WiLoR)** (and [WiLoR-mini](https://github.com/warmshao/WiLoR-mini))
-- **[MANO](https://mano.is.tue.mpg.de/)**
-- **[Ultralytics](https://ultralytics.com/)**
+- [COCO-WholeBody](https://github.com/jin-s13/COCO-WholeBody)
+- [HInt](https://github.com/ddshan/hint)
+- [WiLoR](https://github.com/rolpotamias/WiLoR) (and [WiLoR-mini](https://github.com/warmshao/WiLoR-mini))
+- [HaMeR](https://github.com/geopavlakos/hamer)
+- [MANO](https://mano.is.tue.mpg.de/)
+- [Ultralytics](https://ultralytics.com/)
 
 ## Citation
 
