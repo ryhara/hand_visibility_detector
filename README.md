@@ -5,7 +5,13 @@ Given an RGB image, the pipeline detects both hands and predicts a visibility sc
 
 [![Demo](https://img.shields.io/badge/🤗%20Demo-hand--visibility--detector-blue)](https://huggingface.co/spaces/ryhara/hand-visibility-detector)
 [![Model](https://img.shields.io/badge/🤗%20Model-ryhara%2Fhand--visibility--detector-yellow)](https://huggingface.co/ryhara/hand-visibility-detector)
-![sample.png](assets/sample.png)
+
+
+https://github.com/user-attachments/assets/d0e3ba63-4497-4e21-927b-d548201e2640
+
+[To Video](./assets/video.mp4)
+
+<!-- ![sample.png](assets/sample.png) -->
 
 ## Update
 - [x] 2026/07/10 add other backbone (cspnext, resnet, vit, hamer)
