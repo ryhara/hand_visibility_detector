@@ -151,7 +151,7 @@ python -m training.evaluate --config training/configs/hint_eval.yaml \
 
 ## License
 
-This project is released for **research and non-commercial use only**, inheriting the most restrictive terms of its upstream dependencies. Any use of this code, weights, or derivatives must comply with **all** of the following:
+This project is released for **research and non-commercial use only with proper attribution and citation required**, inheriting the most restrictive terms of its upstream dependencies. Any use of this code, weights, or derivatives must comply with **all** of the following:
 
 - [COCO-WholeBody](https://github.com/jin-s13/COCO-WholeBody)
 - [HInt](https://github.com/ddshan/hint)
@@ -163,6 +163,16 @@ This project is released for **research and non-commercial use only**, inheritin
 ## Citation
 
 If you use this software, please cite it as:
+
+<!--
+```bibtex
+@misc{hara2026hand_visibility_detector,
+      title={Hand Visibility Detector: Per-Keypoint Visibility Estimation for Hands}, 
+      author={Ryosei Hara and Masashi Hatano and Rintaro Yanagi and Atsushi Hashimoto and Takuma Yagi and Mariko Isogawa},
+      year={2026},
+}
+```
+-->
 
 ```bibtex
 @software{hara2026handvisibility,
