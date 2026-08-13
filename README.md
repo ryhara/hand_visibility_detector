@@ -1,10 +1,29 @@
-# Hand Visibility Detector
+<div align="center">
 
-Per-keypoint hand visibility detection built on top of [WiLoR-mini](https://github.com/warmshao/WiLoR-mini).
-Given an RGB image, the pipeline detects both hands and predicts a visibility score for each of the 21 MANO keypoints.
+# Hand Visibility Detector: Per-Keypoint Visibility Estimation for Hands
 
+[Ryosei Hara](https://ryhara.github.io/)<sup>1,2</sup>,
+[Masashi Hatano](https://masashi-hatano.github.io/)<sup>4</sup>,
+[Rintaro Yanagi](https://yanarin.github.io/)<sup>2</sup>,
+[Atsushi Hashimoto](https://atsushihashimoto.github.io/cv/)<sup>3</sup>,
+[Takuma Yagi](https://artilects.net/)<sup>2</sup>,
+[Mariko Isogawa](https://isogawa.ics.keio.ac.jp/)<sup>1,2</sup>
+
+
+<sup>1</sup> Keio University, <sup>2</sup>National Institute of Advanced Industrial Science and Technology (AIST),<br>
+<sup>3</sup> OMRON SINIC X Corporation, <sup>4</sup>The University of Tokyo
+
+<font color="red"><strong>arXiv 2026</strong></font>
+
+<a href='https://arxiv.org/abs/2608.11574'><img src='https://img.shields.io/badge/Paper-arXiv-red'></a>
 [![Demo](https://img.shields.io/badge/🤗%20Demo-hand--visibility--detector-blue)](https://huggingface.co/spaces/ryhara/hand-visibility-detector)
 [![Model](https://img.shields.io/badge/🤗%20Model-ryhara%2Fhand--visibility--detector-yellow)](https://huggingface.co/ryhara/hand-visibility-detector)
+
+</div>
+
+
+Per-keypoint hand visibility detection. Given an RGB image, the pipeline detects both hands and predicts a visibility score for each of the 21 MANO keypoints.
+
 
 
 https://github.com/user-attachments/assets/d0e3ba63-4497-4e21-927b-d548201e2640
@@ -14,6 +33,7 @@ https://github.com/user-attachments/assets/d0e3ba63-4497-4e21-927b-d548201e2640
 <!-- ![sample.png](assets/sample.png) -->
 
 ## Update
+- [x] 2026/08/12 paper is now available on arXiv!
 - [x] 2026/07/10 add other backbone (cspnext, resnet, vit, hamer)
 - [x] 2026/07/09 add demo_video.py, add joint rotation visualization
 - [x] 2026/07/06 use ego4d data, fix training code, add evaluation code
@@ -164,23 +184,15 @@ This project is released for **research and non-commercial use only with proper 
 
 If you use this software, please cite it as:
 
-<!--
 ```bibtex
-@misc{hara2026hand_visibility_detector,
+@misc{hara2026handvisibilitydetector,
       title={Hand Visibility Detector: Per-Keypoint Visibility Estimation for Hands}, 
       author={Ryosei Hara and Masashi Hatano and Rintaro Yanagi and Atsushi Hashimoto and Takuma Yagi and Mariko Isogawa},
       year={2026},
-}
-```
--->
-
-```bibtex
-@software{hara2026handvisibility,
-  author  = {Hara, Ryosei},
-  title   = {Hand Visibility Detector},
-  year    = {2026},
-  url     = {https://github.com/ryhara/hand_visibility_detector},
-  version = {0.1.0}
+      eprint={2608.11574},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2608.11574}, 
 }
 ```
 
