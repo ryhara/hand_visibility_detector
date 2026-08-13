@@ -22,15 +22,20 @@
 </div>
 
 
-Per-keypoint hand visibility detection. Given an RGB image, the pipeline detects both hands and predicts a visibility score for each of the 21 MANO keypoints.
+<!-- https://github.com/user-attachments/assets/d0e3ba63-4497-4e21-927b-d548201e2640 -->
 
 
+https://github.com/user-attachments/assets/1b7172b1-9259-4437-b786-0963fc941ae9
 
-https://github.com/user-attachments/assets/d0e3ba63-4497-4e21-927b-d548201e2640
+
 
 [To Video](./assets/video.mp4)
 
 <!-- ![sample.png](assets/sample.png) -->
+
+
+
+
 
 ## Update
 - [x] 2026/08/12 paper is now available on arXiv!
@@ -90,6 +95,7 @@ Gradio UI:
 ```bash
 python demo_gradio.py
 ```
+※ Hand bounding boxes and poses are estimated using WiLoR, whereas per-keypoint visibility estimation is performed using our own method.
 
 ## Training
 
