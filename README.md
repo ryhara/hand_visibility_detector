@@ -29,7 +29,7 @@ https://github.com/user-attachments/assets/1b7172b1-9259-4437-b786-0963fc941ae9
 
 
 
-[To Video](./assets/video.mp4)
+[To Video](./assets/video.mp4), Sample data from: [DexYCB](https://dex-ycb.github.io/), [HO-Cap](https://irvlutd.github.io/HOCap/)
 
 <!-- ![sample.png](assets/sample.png) -->
 
