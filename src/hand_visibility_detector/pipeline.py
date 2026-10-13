@@ -7,16 +7,16 @@ import io
 import logging
 from dataclasses import dataclass, field
 
-import cv2
 import numpy as np
 import torch
-from skimage.filters import gaussian
-from wilor_mini.pipelines.wilor_hand_pose3d_estimation_pipeline import (
-    WiLorHandPose3dEstimationPipeline,
-)
-from wilor_mini.utils import utils as wilor_utils
 
-from .hub import default_checkpoint_for_backbone
+from .hub import default_checkpoint_for_backbone, wilor_mini_asset
+from .pose import (
+    POSE_MODELS,
+    HandPoseEstimator,
+    default_pose_checkpoint,
+    load_checkpoint_state_dict,
+)
 from .rotations import axis_angle_to_euler
 from .transforms import (
     crop_square,
@@ -58,7 +58,9 @@ class HandResult:
     """(21,) per-keypoint visibility probability in [0, 1]."""
 
     wilor_preds: dict = field(default_factory=dict, repr=False)
-    """Raw WiLoR output dictionary (for advanced usage)."""
+    """Raw pose-model output dictionary (for advanced usage: ``betas``,
+    ``pred_vertices``, ``pred_cam_t_full``, ...). Same schema for every
+    ``pose_model``; the name is kept for backward compatibility."""
 
     global_orient: np.ndarray | None = None
     """(3,) MANO global (wrist) orientation as axis-angle in camera space.
@@ -78,130 +80,6 @@ class HandResult:
 
 
 # ---------------------------------------------------------------------------
-# WiLoR subclass that preserves bbox confidence
-# ---------------------------------------------------------------------------
-
-
-class _WiLorWithConf(WiLorHandPose3dEstimationPipeline):
-    """Thin subclass that adds ``bbox_conf`` to each detection dict."""
-
-    @torch.no_grad()
-    def predict(self, image, **kwargs):
-        self.logger.info("start hand detection >>> ")
-        detections = self.hand_detector(
-            image, conf=kwargs.get("hand_conf", 0.3), verbose=self.verbose
-        )[0]
-        detect_rets = []
-        bboxes = []
-        is_rights = []
-        for det in detections:
-            hand_bbox = det.boxes.data.cpu().detach().squeeze().numpy()
-            is_rights.append(det.boxes.cls.cpu().detach().squeeze().item())
-            bboxes.append(hand_bbox[:4].tolist())
-            detect_rets.append({
-                "hand_bbox": bboxes[-1],
-                "is_right": is_rights[-1],
-                "bbox_conf": float(hand_bbox[4]),
-            })
-
-        if len(bboxes) == 0:
-            self.logger.warning("No hand detected!")
-            return detect_rets
-
-        bboxes = np.stack(bboxes)
-
-        rescale_factor = kwargs.get("rescale_factor", 2.5)
-        center = (bboxes[:, 2:4] + bboxes[:, 0:2]) / 2.0
-        scale = rescale_factor * (bboxes[:, 2:4] - bboxes[:, 0:2])
-        self.logger.info(f"detect {bboxes.shape[0]} hands")
-        self.logger.info("start hand 3d pose estimation >>> ")
-        img_patches = []
-        img_size = np.array([image.shape[1], image.shape[0]])
-        for i in range(bboxes.shape[0]):
-            bbox_size = scale[i].max()
-            patch_width = patch_height = self.IMAGE_SIZE
-            right = is_rights[i]
-            flip = right == 0
-            box_center = center[i]
-
-            cvimg = image.copy()
-            downsampling_factor = ((bbox_size * 1.0) / patch_width)
-            downsampling_factor = downsampling_factor / 2.0
-            if downsampling_factor > 1.1:
-                cvimg = gaussian(
-                    cvimg, sigma=(downsampling_factor - 1) / 2,
-                    channel_axis=2, preserve_range=True,
-                )
-
-            img_patch_cv, _trans = wilor_utils.generate_image_patch_cv2(
-                cvimg,
-                box_center[0], box_center[1],
-                bbox_size, bbox_size,
-                patch_width, patch_height,
-                flip, 1.0, 0,
-                border_mode=cv2.BORDER_CONSTANT,
-            )
-            img_patches.append(img_patch_cv)
-
-        img_patches = np.stack(img_patches)
-        img_patches = torch.from_numpy(img_patches).to(
-            device=self.device, dtype=self.dtype
-        )
-        wilor_output = self.wilor_model(img_patches)
-        wilor_output = {k: v.cpu().float().numpy() for k, v in wilor_output.items()}
-
-        for i in range(len(detect_rets)):
-            wilor_output_i = {key: val[[i]] for key, val in wilor_output.items()}
-            pred_cam = wilor_output_i["pred_cam"]
-            bbox_size = scale[i].max()
-            box_center = center[i]
-            right = is_rights[i]
-            multiplier = (2 * right - 1)
-            pred_cam[:, 1] = multiplier * pred_cam[:, 1]
-            if right == 0:
-                wilor_output_i["pred_keypoints_3d"][:, :, 0] = (
-                    -wilor_output_i["pred_keypoints_3d"][:, :, 0]
-                )
-                wilor_output_i["pred_vertices"][:, :, 0] = (
-                    -wilor_output_i["pred_vertices"][:, :, 0]
-                )
-                wilor_output_i["global_orient"] = np.concatenate(
-                    (
-                        wilor_output_i["global_orient"][:, :, 0:1],
-                        -wilor_output_i["global_orient"][:, :, 1:3],
-                    ),
-                    axis=-1,
-                )
-                wilor_output_i["hand_pose"] = np.concatenate(
-                    (
-                        wilor_output_i["hand_pose"][:, :, 0:1],
-                        -wilor_output_i["hand_pose"][:, :, 1:3],
-                    ),
-                    axis=-1,
-                )
-            scaled_focal_length = (
-                self.FOCAL_LENGTH / self.IMAGE_SIZE * img_size.max()
-            )
-            pred_cam_t_full = wilor_utils.cam_crop_to_full(
-                pred_cam, box_center[None], bbox_size, img_size[None],
-                scaled_focal_length,
-            )
-            wilor_output_i["pred_cam_t_full"] = pred_cam_t_full
-            wilor_output_i["scaled_focal_length"] = scaled_focal_length
-            pred_keypoints_2d = wilor_utils.perspective_projection(
-                wilor_output_i["pred_keypoints_3d"],
-                translation=pred_cam_t_full,
-                focal_length=np.array([scaled_focal_length] * 2)[None],
-                camera_center=img_size[None] / 2,
-            )
-            wilor_output_i["pred_keypoints_2d"] = pred_keypoints_2d
-            detect_rets[i]["wilor_preds"] = wilor_output_i
-
-        self.logger.info("finish detection!")
-        return detect_rets
-
-
-# ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
 
@@ -210,33 +88,36 @@ def _fresh_wilor_backbone() -> torch.nn.Module:
     """Build a random-initialised WiLoR ViT backbone (for checkpoints that
     contain fine-tuned backbone weights). Only ``mano_mean_params.npz`` is
     fetched from the Hub -- not the full WiLoR checkpoint."""
-    import os
-
-    import wilor_mini
     from wilor_mini.models.vit import vit
 
-    pretrained_dir = os.path.join(
-        os.path.dirname(wilor_mini.__file__), "pretrained_models"
-    )
-    path = os.path.join(pretrained_dir, "mano_mean_params.npz")
-    if not os.path.exists(path):
-        from huggingface_hub import hf_hub_download
+    return vit(mano_mean_path=wilor_mini_asset("mano_mean_params.npz"))
 
-        hf_hub_download(
-            repo_id="warmshao/WiLoR-mini",
-            subfolder="pretrained_models",
-            filename="mano_mean_params.npz",
-            local_dir=os.path.dirname(wilor_mini.__file__),
-        )
-    return vit(mano_mean_path=path)
+
+def _pretrained_wilor_backbone(pose_model: str = "wilor") -> torch.nn.Module:
+    """Build the ViT backbone of a WiLoR-family ``pose_model`` (``wilor`` /
+    ``anyhand_wilor``) with its pre-trained weights (for head-only checkpoints
+    when that is not the pose model the pipeline runs)."""
+    backbone = _fresh_wilor_backbone()
+    state = load_checkpoint_state_dict(default_pose_checkpoint(pose_model))
+    backbone.load_state_dict(
+        {k[len("backbone."):]: v for k, v in state.items() if k.startswith("backbone.")},
+        strict=True,
+    )
+    return backbone
 
 
 class HandVisibilityPipeline:
     """End-to-end hand detection, 3D pose estimation, and per-keypoint
     visibility prediction.
 
-    The visibility backbone (``wilor`` / ``hamer`` / ``resnet*`` / ``vit_*`` /
-    ``cspnext_*``) is read from the checkpoint's saved config. Published
+    Hands are detected with WiLoR's YOLO detector; their 3D pose (MANO) comes
+    from ``pose_model`` -- ``wilor`` (default), ``hamer``, or the AnyHand
+    fine-tuned ``anyhand_wilor`` / ``anyhand_hamer`` (see
+    :mod:`hand_visibility_detector.pose`).
+
+    The visibility backbone (``wilor`` / ``hamer`` / ``anyhand_wilor`` /
+    ``anyhand_hamer`` / ``resnet*`` / ``vit_*`` / ``cspnext_*``) is read from
+    the checkpoint's saved config. Published
     checkpoints exist for ``wilor`` (``best.pt``) and ``hamer``
     (``best_hamer.pt``) and are auto-downloaded; any other backbone needs an
     explicit ``vis_checkpoint`` path to your own trained checkpoint.
@@ -245,6 +126,7 @@ class HandVisibilityPipeline:
     -------
     >>> pipe = HandVisibilityPipeline(device="cuda")            # WiLoR backbone
     >>> pipe = HandVisibilityPipeline(device="cuda", backbone="hamer")
+    >>> pipe = HandVisibilityPipeline(device="cuda", pose_model="anyhand_hamer")
     >>> pipe = HandVisibilityPipeline(device="cuda", vis_checkpoint="runs/.../best.pt")
     >>> results = pipe.predict(image_rgb)
     >>> for r in results:
@@ -262,6 +144,10 @@ class HandVisibilityPipeline:
         return_rotations: bool = False,
         backbone: str | None = None,
         backbone_weights: str | None = None,
+        pose_model: str = "wilor",
+        pose_checkpoint: str | None = None,
+        focal_length: float | None = None,
+        share_backbone: bool = False,
     ) -> None:
         """
         Parameters
@@ -270,13 +156,27 @@ class HandVisibilityPipeline:
             the published checkpoint for ``backbone`` is downloaded from
             HuggingFace Hub (only available for ``wilor`` and ``hamer``).
         backbone : Which published checkpoint to fetch when ``vis_checkpoint``
-            is ``None`` (``"wilor"``, the default, or ``"hamer"``). The actual
-            model architecture is always rebuilt from the checkpoint's own
-            saved config.
+            is ``None`` (``"wilor"`` or ``"hamer"``; defaults to the family of
+            ``pose_model``). The actual model architecture is always rebuilt
+            from the checkpoint's own saved config.
         backbone_weights : Optional local path to the backbone's pre-trained
-            weights, used by head-only checkpoints of the ``hamer`` backbone
-            (the published ``hamer.ckpt``; resolved via ``HAMER_WEIGHTS`` or
-            auto-downloaded from the official HaMeR Space when omitted).
+            weights, used by head-only checkpoints of the ``hamer`` /
+            ``anyhand_hamer`` backbones (``hamer.ckpt`` / ``anyhand_hamer.ckpt``;
+            auto-downloaded when omitted, ``hamer`` also honours
+            ``HAMER_WEIGHTS``).
+        pose_model : 3D hand pose model: ``"wilor"``, ``"hamer"``,
+            ``"anyhand_wilor"`` or ``"anyhand_hamer"``.
+        pose_checkpoint : Optional local path to ``pose_model``'s weights
+            (downloaded and cached from HuggingFace Hub when omitted).
+        focal_length : Override ``pose_model``'s default focal length.
+        share_backbone : Run a head-only visibility checkpoint on the backbone
+            of a different pose model of the same family (e.g. a ``hamer`` head
+            on ``anyhand_hamer``; saves one ViT-H, ~2.5 GB) instead of loading
+            the backbone the head was trained on. Heads change substantially
+            across these backbones (the AnyHand ones are fine-tuned), so this
+            is off by default. A head whose backbone *is* ``pose_model``
+            (``wilor`` / ``hamer`` / ``anyhand_wilor`` / ``anyhand_hamer``)
+            always shares it.
         """
         if isinstance(device, str):
             device = torch.device(device)
@@ -287,17 +187,23 @@ class HandVisibilityPipeline:
         self.crop_size = crop_size
         self.return_rotations = return_rotations
 
-        # 1. WiLoR pipeline (with confidence). Swallow the MANO `print` banner
+        # 1. Hand detector + 3D pose model. Swallow the MANO `print` banner
         #    emitted by smplx during initialization.
         with contextlib.redirect_stdout(io.StringIO()):
-            self._wilor_pipe = _WiLorWithConf(
-                device=device, dtype=dtype, verbose=False,
+            self._pose = HandPoseEstimator(
+                pose_model,
+                device=device,
+                dtype=dtype,
+                checkpoint=pose_checkpoint,
+                focal_length=focal_length,
             )
 
         # 2. Visibility network. The architecture (backbone / hidden_dim) is
         #    rebuilt from the checkpoint's saved config.
         if vis_checkpoint is None:
-            vis_checkpoint = default_checkpoint_for_backbone(backbone or "wilor")
+            vis_checkpoint = default_checkpoint_for_backbone(
+                backbone or self._pose.family
+            )
         ckpt = torch.load(vis_checkpoint, map_location="cpu", weights_only=False)
         state_dict = ckpt["model"]
         cfg = ckpt.get("config", {}).get("model", {})
@@ -314,14 +220,42 @@ class HandVisibilityPipeline:
         # checkpoint holds the full (fine-tuned) model state.
         head_only = bool(ckpt.get("head_only", True))
 
-        if backbone_name == "wilor":
-            if head_only:
-                # Share the (frozen, pre-trained) WiLoR backbone with the pose
-                # pipeline.
-                raw_backbone = self._wilor_pipe.wilor_model.backbone
+        # A head-only checkpoint shares the (frozen) pose-model backbone when it
+        # carries the weights the head was trained on, i.e. the head's backbone
+        # is the pose model itself. Other backbones of the same family (original
+        # vs. AnyHand fine-tuned) are shared only on request.
+        backbone_family = (
+            POSE_MODELS[backbone_name].family
+            if backbone_name in POSE_MODELS
+            else backbone_name
+        )
+        shared_backbone = None
+        if head_only and backbone_family == self._pose.family:
+            if self._pose.pose_model == backbone_name:
+                shared_backbone = self._pose.backbone
+            elif share_backbone:
+                logger.warning(
+                    "share_backbone=True: the visibility head (trained on the "
+                    "%r backbone) runs on the %r backbone.",
+                    backbone_name, self._pose.pose_model,
+                )
+                shared_backbone = self._pose.backbone
+        if share_backbone and shared_backbone is None:
+            logger.warning(
+                "share_backbone=True ignored: the %s visibility checkpoint "
+                "cannot use the %r pose model's backbone.",
+                "head-only " + backbone_name if head_only else "fine-tuned",
+                self._pose.pose_model,
+            )
+
+        if backbone_family == "wilor":
+            if shared_backbone is not None:
+                raw_backbone = shared_backbone
+            elif head_only:
+                raw_backbone = _pretrained_wilor_backbone(backbone_name)
             else:
                 # The checkpoint carries fine-tuned backbone weights: use a
-                # separate backbone so the pose pipeline's weights stay intact.
+                # separate backbone so the pose model's weights stay intact.
                 raw_backbone = _fresh_wilor_backbone()
             self._vis_model = HandVisibilityNet(
                 raw_backbone=raw_backbone,
@@ -329,12 +263,15 @@ class HandVisibilityPipeline:
                 freeze_backbone=True,
             )
         else:
-            from .backbones import build_backbone
+            from .backbones import HamerViTBackbone, build_backbone
 
-            bb_kwargs = {}
-            if backbone_weights is not None:
-                bb_kwargs["weights"] = backbone_weights
-            bb = build_backbone(backbone_name, pretrained=head_only, **bb_kwargs)
+            if shared_backbone is not None:
+                bb = HamerViTBackbone(vit=shared_backbone)
+            else:
+                bb_kwargs = {}
+                if backbone_weights is not None:
+                    bb_kwargs["weights"] = backbone_weights
+                bb = build_backbone(backbone_name, pretrained=head_only, **bb_kwargs)
             self._vis_model = HandVisibilityNet(
                 backbone=bb,
                 feat_dim=bb.feat_dim,
@@ -369,18 +306,13 @@ class HandVisibilityPipeline:
         """
         if return_rotations is None:
             return_rotations = self.return_rotations
-        detections = self._wilor_pipe.predict(image, hand_conf=self.hand_conf)
+        detections = self._pose.predict(image, hand_conf=self.hand_conf)
         if not detections:
-            return []
-
-        # Filter out detections without wilor_preds (detection-only, no pose)
-        valid_dets = [d for d in detections if "wilor_preds" in d]
-        if not valid_dets:
             return []
 
         # Prepare visibility crops
         tensors = []
-        for det in valid_dets:
+        for det in detections:
             bbox_xyxy = det["hand_bbox"]
             bbox_xywh = xyxy_to_xywh(bbox_xyxy)
             is_right = bool(det["is_right"])
@@ -398,8 +330,8 @@ class HandVisibilityPipeline:
 
         # Assemble results
         results: list[HandResult] = []
-        for i, det in enumerate(valid_dets):
-            wp = det["wilor_preds"]
+        for i, det in enumerate(detections):
+            wp = det["pose_preds"]
             global_orient = global_orient_euler = None
             hand_pose = hand_pose_euler = None
             if return_rotations:

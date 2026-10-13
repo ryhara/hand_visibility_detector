@@ -1,4 +1,5 @@
-"""hand-visibility-detector: Per-keypoint hand visibility detection using WiLoR-mini."""
+"""hand-visibility-detector: Per-keypoint hand visibility detection on top of
+WiLoR / HaMeR (optionally AnyHand fine-tuned) hand pose estimation."""
 
 import warnings as _warnings
 
@@ -8,6 +9,7 @@ _warnings.filterwarnings("ignore", message=r".*timm\.models\.layers.*", category
 _warnings.filterwarnings("ignore", message=r".*align=0.*")
 
 from .pipeline import HandResult, HandVisibilityPipeline
+from .pose import POSE_MODELS, HandPoseEstimator
 from .rotations import (
     axis_angle_to_euler,
     axis_angle_to_matrix,
@@ -22,6 +24,8 @@ __version__ = "0.1.0"
 __all__ = [
     "HandVisibilityPipeline",
     "HandResult",
+    "HandPoseEstimator",
+    "POSE_MODELS",
     "draw_detections",
     "draw_rotation_axes",
     "vis_color",

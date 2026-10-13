@@ -5,6 +5,9 @@ The backbone is selectable via config (``model.backbone``):
     * ``wilor`` (default) -- WiLoR ViT backbone loaded via ``wilor_mini`` (the
       WiLoR pipeline is instantiated on CPU just to extract its backbone, then
       discarded). feat_dim 1280, WiLoR's 256->192 center-crop preprocessing.
+    * ``anyhand_wilor`` / ``anyhand_hamer`` -- the WiLoR / HaMeR backbones with
+      the AnyHand fine-tuned weights (``chen-si-02/AnyHand-Models``,
+      auto-downloaded). Same architecture and preprocessing as the originals.
     * ResNet (``resnet18`` | ``resnet34`` | ``resnet50`` | ``resnet101`` |
       ``resnet152``), ViT (``vit_b_16`` | ``vit_b_32`` | ``vit_l_16`` |
       ``vit_l_32`` | ``vit_h_14``), HaMeR (``hamer``), CSPNeXt
@@ -26,7 +29,12 @@ from hand_visibility_detector.visibility_net import (
 )
 
 
-def _load_wilor_backbone() -> nn.Module:
+def _load_wilor_backbone(name: str = "wilor") -> nn.Module:
+    if name == "anyhand_wilor":
+        from hand_visibility_detector.pipeline import _pretrained_wilor_backbone
+
+        return _pretrained_wilor_backbone(name)
+
     from wilor_mini.pipelines.wilor_hand_pose3d_estimation_pipeline import (
         WiLorHandPose3dEstimationPipeline,
     )
@@ -45,9 +53,9 @@ def build_model(
     num_keypoints: int = NUM_HAND_KEYPOINTS,
     freeze_backbone: bool = False,
 ) -> HandVisibilityNet:
-    if backbone.lower() == "wilor":
+    if backbone.lower() in ("wilor", "anyhand_wilor"):
         return HandVisibilityNet(
-            raw_backbone=_load_wilor_backbone(),
+            raw_backbone=_load_wilor_backbone(backbone.lower()),
             dropout=dropout,
             hidden_dim=hidden_dim,
             num_keypoints=num_keypoints,

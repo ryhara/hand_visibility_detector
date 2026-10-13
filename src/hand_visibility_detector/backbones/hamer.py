@@ -15,12 +15,13 @@ import torch.nn as nn
 # ``HAMER_WEIGHTS`` env var, or ``<project_root>/external/hamer_weights/hamer.ckpt``)
 # and otherwise auto-downloaded from the official HaMeR demo Space on
 # HuggingFace. feat_dim 1280, output map ``(B, 1280, 16, 12)`` for a 256x192
-# crop -- the same shape WiLoR yields.
-_HAMER_NAMES = {"hamer"}
+# crop -- the same shape WiLoR yields. ``anyhand_hamer`` is the same backbone
+# with the AnyHand fine-tuned weights (``anyhand_hamer.ckpt``, same layout).
+_HAMER_NAMES = {"hamer", "anyhand_hamer"}
 _HAMER_FEAT_DIM = 1280
 
 
-def _resolve_hamer_weights(weights: str | None) -> str:
+def _resolve_hamer_weights(weights: str | None, name: str = "hamer") -> str:
     """Resolve the HaMeR checkpoint path.
 
     ``weights`` overrides everything; otherwise the ``HAMER_WEIGHTS`` env var,
@@ -28,12 +29,19 @@ def _resolve_hamer_weights(weights: str | None) -> str:
     three parents up from this file, i.e. a repo checkout). If none of those
     exist, the checkpoint is auto-downloaded from the official HaMeR demo Space
     on HuggingFace (``geopavlakos/HaMeR``) and cached.
+
+    For ``name="anyhand_hamer"`` only ``weights`` applies; otherwise the AnyHand
+    checkpoint is auto-downloaded from HuggingFace and cached.
     """
     import os
     from pathlib import Path
 
     if weights is not None:
         return weights
+    if name == "anyhand_hamer":
+        from ..hub import download_anyhand_checkpoint
+
+        return download_anyhand_checkpoint(name)
     env = os.environ.get("HAMER_WEIGHTS")
     if env:
         return env
@@ -60,6 +68,11 @@ class HamerViTBackbone(nn.Module):
     tensor is fed in, we centre-crop to ``256x192`` via ``x[:, :, :, 32:-32]``
     -- exactly as the WiLoR backbone wrapper does -- so the pre-trained
     positional embeddings stay valid. ``feat_dim`` is 1280.
+
+    ``name="anyhand_hamer"`` loads the AnyHand fine-tuned weights instead.
+
+    Pass an already-loaded ViT as ``vit`` (e.g. the backbone of a HaMeR pose
+    model) to share it instead of building and loading a new one.
     """
 
     def __init__(
@@ -67,14 +80,18 @@ class HamerViTBackbone(nn.Module):
         name: str = "hamer",
         pretrained: bool = True,
         weights: str | None = None,
+        vit: nn.Module | None = None,
     ) -> None:
         super().__init__()
+        self.feat_dim = _HAMER_FEAT_DIM
+        if vit is not None:
+            self.vit = vit
+            return
         from .hamer_vit import vit as build_hamer_vit
 
         self.vit = build_hamer_vit()
-        self.feat_dim = _HAMER_FEAT_DIM
         if pretrained:
-            self._load_pretrained(_resolve_hamer_weights(weights))
+            self._load_pretrained(_resolve_hamer_weights(weights, name))
 
     def _load_pretrained(self, weights: str) -> None:
         import os

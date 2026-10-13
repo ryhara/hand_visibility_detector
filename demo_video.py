@@ -9,7 +9,7 @@ import time
 import cv2
 import torch
 
-from hand_visibility_detector import HandVisibilityPipeline, draw_detections
+from hand_visibility_detector import POSE_MODELS, HandVisibilityPipeline, draw_detections
 
 
 def main() -> None:
@@ -20,6 +20,7 @@ def main() -> None:
     parser.add_argument("--hand-conf", type=float, default=0.5, help="Hand detection confidence threshold")
     parser.add_argument("--checkpoint", default=None, help="Path to visibility checkpoint (auto-downloads if omitted)")
     parser.add_argument("--backbone", default=None, help="Published checkpoint to auto-download when --checkpoint is omitted (wilor or hamer)")
+    parser.add_argument("--pose-model", default="wilor", choices=list(POSE_MODELS), help="3D hand pose model (wilor, hamer, anyhand_wilor, anyhand_hamer)")
     parser.add_argument("--show-global-orient", action="store_true", help="Visualize global_orient (wrist axes + roll/pitch/yaw text)")
     parser.add_argument("--show-hand-pose", action="store_true", help="Visualize hand_pose (per-joint rotation axes)")
     parser.add_argument("--frame-skip", type=int, default=0, help="Process every (N+1)-th frame; skipped frames reuse the last result")
@@ -40,6 +41,7 @@ def main() -> None:
         device=device,
         dtype=dtype,
         vis_checkpoint=args.checkpoint,
+        pose_model=args.pose_model,
         backbone=args.backbone,
         hand_conf=args.hand_conf,
     )

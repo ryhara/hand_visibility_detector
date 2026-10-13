@@ -25,6 +25,8 @@ Supported names (case-insensitive):
                 auto-downloaded from the official HaMeR Space. Like WiLoR it
                 consumes a 256x192 center-crop and outputs ``(B, 1280, 16, 12)``,
                 but it is a plain backbone with no fused MANO regression tokens.
+                ``anyhand_hamer`` is the same backbone with the AnyHand
+                fine-tuned weights (``anyhand_hamer.ckpt``, auto-downloaded).
     * CSPNeXt : ``cspnext_tiny`` | ``cspnext_s`` | ``cspnext_m`` |
                 ``cspnext_l`` | ``cspnext_x`` (feat_dim 384 / 512 / 768 / 1024 /
                 1280; ``cspnext`` aliases the ``m`` variant). RTMDet's CSPNeXt
@@ -34,7 +36,7 @@ Supported names (case-insensitive):
                 (fetched and cached via ``torch.hub``). No ``mmdet`` / ``mmcv``
                 dependency is needed.
 
-The WiLoR ViT backbone is handled separately in
+The WiLoR ViT backbone (``wilor`` / ``anyhand_wilor``) is handled separately in
 :func:`hand_visibility_detector.visibility_net.HandVisibilityNet` (it must be
 loaded from the ``wilor_mini`` pipeline), so it is not built here.
 
@@ -71,8 +73,9 @@ __all__ = [
 def build_backbone(name: str, pretrained: bool = True, **kwargs) -> nn.Module:
     """Build a feature-map backbone by name.
 
-    Returns an ``nn.Module`` with a ``feat_dim`` attribute. ``"wilor"`` is not
-    handled here -- see :class:`HandVisibilityNet` / the training ``model.py``.
+    Returns an ``nn.Module`` with a ``feat_dim`` attribute. ``"wilor"`` /
+    ``"anyhand_wilor"`` are not handled here -- see :class:`HandVisibilityNet` /
+    the training ``model.py``.
     Extra ``kwargs`` are forwarded to the backbone constructor (e.g.
     ``weights=...`` for ``hamer``).
     """
@@ -90,7 +93,7 @@ def build_backbone(name: str, pretrained: bool = True, **kwargs) -> nn.Module:
     if key in _CSPNEXT_ARCH:
         return CSPNeXtBackbone(key, pretrained=pretrained, **kwargs)
     raise ValueError(
-        f"unknown backbone name: {name!r} (supported: 'wilor', "
+        f"unknown backbone name: {name!r} (supported: 'wilor', 'anyhand_wilor', "
         f"{', '.join(sorted(_RESNET_NAMES))}, {', '.join(sorted(_VIT_NAMES))}, "
         f"{', '.join(sorted(_HAMER_NAMES))}, {', '.join(sorted(_CSPNEXT_ARCH))})"
     )
