@@ -15,6 +15,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Gradio hand visibility demo")
     parser.add_argument("--device", default="cuda", help="Device (cuda or cpu)")
     parser.add_argument("--checkpoint", default=None, help="Visibility checkpoint path")
+    parser.add_argument("--pose-model", default="wilor", help="3D hand pose model (wilor, hamer, anyhand_wilor, anyhand_hamer)")
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--share", action="store_true")
     args = parser.parse_args()
@@ -32,6 +33,7 @@ def main() -> None:
         device=device,
         dtype=dtype,
         vis_checkpoint=args.checkpoint,
+        pose_model=args.pose_model,
     )
 
     def process_image(

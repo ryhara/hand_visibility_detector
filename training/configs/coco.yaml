@@ -48,7 +48,7 @@ data:
 
 model:
   # wilor | resnet18/34/50/101/152 | vit_b_16/b_32/l_16/l_32/h_14 | hamer
-  # | cspnext_tiny/s/m/l/x
+  # | cspnext_tiny/s/m/l/x | anyhand_wilor | anyhand_hamer
   backbone: wilor
   pretrained: true
   freeze_backbone: true

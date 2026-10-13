@@ -38,6 +38,7 @@ https://github.com/user-attachments/assets/1b7172b1-9259-4437-b786-0963fc941ae9
 
 
 ## Update
+- [x] 2026/10/14 add AnyHand
 - [x] 2026/08/12 paper is now available on arXiv!
 - [x] 2026/07/10 add other backbone (cspnext, resnet, vit, hamer)
 - [x] 2026/07/09 add demo_video.py, add joint rotation visualization
@@ -81,6 +82,7 @@ Image:
 python demo.py path/to/image.jpg -o output.jpg
 ```
 - `--hand-conf`: hand detection confidence threshold
+- `--pose-model`: 3D hand pose model (`wilor` (default), `hamer`, `anyhand_wilor`, `anyhand_hamer`)
 - `--show-global-orient`: wrist rotation visualization
 - `--show-hand-pose`: per-joint rotation visualization
 
@@ -95,7 +97,7 @@ Gradio UI:
 ```bash
 python demo_gradio.py
 ```
-※ Hand bounding boxes and poses are estimated using WiLoR, whereas per-keypoint visibility estimation is performed using our own method.
+※ Hand bounding boxes are detected with WiLoR's detector and hand poses are estimated with the selected pose model (WiLoR by default), whereas per-keypoint visibility estimation is performed using our own method.
 
 ## Training
 
@@ -183,6 +185,7 @@ This project is released for **research and non-commercial use only with proper 
 - [HInt](https://github.com/ddshan/hint)
 - [WiLoR](https://github.com/rolpotamias/WiLoR) (and [WiLoR-mini](https://github.com/warmshao/WiLoR-mini))
 - [HaMeR](https://github.com/geopavlakos/hamer)
+- [AnyHand](https://github.com/chen-si-cs/AnyHand)
 - [MANO](https://mano.is.tue.mpg.de/)
 - [Ultralytics](https://ultralytics.com/)
 
