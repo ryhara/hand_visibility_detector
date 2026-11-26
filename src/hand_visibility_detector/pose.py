@@ -251,9 +251,14 @@ class HandPoseEstimator:
 
     @torch.no_grad()
     def detect(self, image: np.ndarray, hand_conf: float = 0.3) -> list[dict]:
-        """Detect hands. Returns dicts with ``hand_bbox`` ([x1, y1, x2, y2]),
-        ``is_right`` (1.0 / 0.0) and ``bbox_conf``."""
-        detections = self.hand_detector(image, conf=hand_conf, verbose=False)[0]
+        """Detect hands in an ``(H, W, 3)`` uint8 RGB image. Returns dicts with
+        ``hand_bbox`` ([x1, y1, x2, y2]), ``is_right`` (1.0 / 0.0) and
+        ``bbox_conf``."""
+        # Ultralytics takes numpy arrays as BGR (what cv2.imread returns), the
+        # channel order the detector was trained with, so the RGB image is
+        # converted back for it (the pose model below keeps the RGB image).
+        image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        detections = self.hand_detector(image_bgr, conf=hand_conf, verbose=False)[0]
         rets = []
         for det in detections:
             hand_bbox = det.boxes.data.cpu().detach().squeeze().numpy()
