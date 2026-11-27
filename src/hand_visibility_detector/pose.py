@@ -24,8 +24,10 @@ Left hands are mirrored back after being regressed as right hands.
 from __future__ import annotations
 
 import inspect
+import math
 import pickle
 import types
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import cv2
@@ -158,6 +160,74 @@ def load_checkpoint_state_dict(path: str) -> dict[str, torch.Tensor]:
 
 
 # ---------------------------------------------------------------------------
+# Pose model input
+# ---------------------------------------------------------------------------
+
+# skimage's (scipy's) default: the gaussian kernel reaches 4 sigma.
+_GAUSSIAN_TRUNCATE = 4.0
+
+
+def _pose_patch(
+    image: np.ndarray,
+    c_x: float,
+    c_y: float,
+    bbox_size: float,
+    flip: bool,
+    patch_size: int,
+) -> np.ndarray:
+    """The pose model's input for one hand: the square of side ``bbox_size``
+    centred at (``c_x``, ``c_y``) in the RGB ``image``, resized to
+    ``patch_size`` and mirrored when ``flip`` (left hands); pixels outside the
+    image are black.
+
+    As in ``wilor_mini``, the image is blurred first when the crop shrinks it by
+    more than 1.1x (against aliasing). Only the part of the image the crop
+    reads, widened by the gaussian kernel's radius, is blurred and warped: the
+    gaussian never reaches past that part, and the warp is shifted by its
+    offset, so the patch is the one of blurring and warping the whole image, at
+    a fraction of the cost for a large image.
+    """
+    height, width = image.shape[:2]
+    downsampling_factor = bbox_size / patch_size / 2.0
+    blur = downsampling_factor > 1.1
+    sigma = (downsampling_factor - 1) / 2
+    # The kernel's radius (as scipy rounds it) plus the bilinear interpolation's
+    # neighbour and a pixel to spare.
+    pad = (int(_GAUSSIAN_TRUNCATE * float(sigma) + 0.5) if blur else 0) + 3
+    half = float(bbox_size) / 2.0
+    x0 = max(math.floor(c_x - half) - pad, 0)
+    y0 = max(math.floor(c_y - half) - pad, 0)
+    x1 = min(math.ceil(c_x + half) + pad, width)
+    y1 = min(math.ceil(c_y + half) + pad, height)
+    if x1 <= x0 or y1 <= y0:  # the crop lies outside the image
+        dtype = np.float64 if blur else image.dtype
+        return np.zeros((patch_size, patch_size, image.shape[2]), dtype=dtype)
+
+    part = image[y0:y1, x0:x1]
+    if blur:
+        part = gaussian(part, sigma=sigma, channel_axis=2, preserve_range=True)
+    # The warp of the whole (mirrored) image, as wilor_mini's
+    # generate_image_patch_cv2 builds it ...
+    trans = wilor_utils.gen_trans_from_patch_cv(
+        width - c_x - 1 if flip else c_x, c_y,
+        bbox_size, bbox_size, patch_size, patch_size, 1.0, 0,
+    )
+    if flip:
+        part = np.ascontiguousarray(part[:, ::-1])
+        offset = np.array([width - x1, y0], dtype=np.float64)
+    else:
+        offset = np.array([x0, y0], dtype=np.float64)
+    # ... applied to the part, whose pixel (u, v) is the image's
+    # (u + offset_x, v + offset_y).
+    trans = trans.copy()
+    trans[:, 2] += trans[:, :2] @ offset
+    return cv2.warpAffine(
+        part, trans, (patch_size, patch_size),
+        flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Detector + pose estimator
 # ---------------------------------------------------------------------------
 
@@ -273,42 +343,56 @@ class HandPoseEstimator:
     def estimate(self, image: np.ndarray, detections: list[dict]) -> list[dict]:
         """Run the pose model on each detection, storing its output under the
         ``pose_preds`` key (in place). Returns ``detections``."""
-        if not detections:
-            return detections
-        bboxes = np.array([d["hand_bbox"] for d in detections], dtype=np.float32)
+        self.estimate_batch([image], [detections], batch_size=max(len(detections), 1))
+        return detections
+
+    @torch.no_grad()
+    def estimate_batch(
+        self,
+        images: Sequence[np.ndarray],
+        detections: Sequence[list[dict]],
+        batch_size: int = 32,
+    ) -> Sequence[list[dict]]:
+        """:meth:`estimate` over several ``(H, W, 3)`` uint8 RGB images (e.g. the
+        frames of a video or the views of a camera rig; their sizes may
+        differ), ``detections[i]`` holding the hands of ``images[i]``. The crops
+        of all the hands go through the pose model ``batch_size`` at a time.
+        Returns ``detections``."""
+        if len(images) != len(detections):
+            raise ValueError(
+                f"{len(images)} images but {len(detections)} lists of detections"
+            )
+        if batch_size < 1:
+            raise ValueError(f"batch_size must be at least 1, not {batch_size}")
+        hands = [
+            (image, det) for image, dets in zip(images, detections) for det in dets
+        ]
+        for start in range(0, len(hands), batch_size):
+            self._estimate_hands(hands[start:start + batch_size])
+        return detections
+
+    def _estimate_hands(self, hands: list[tuple[np.ndarray, dict]]) -> None:
+        """Run the pose model on one batch of ``(image, detection)`` pairs."""
+        bboxes = np.array([det["hand_bbox"] for _, det in hands], dtype=np.float32)
         center = (bboxes[:, 2:4] + bboxes[:, 0:2]) / 2.0
         bbox_sizes = self.rescale_factor * (bboxes[:, 2:4] - bboxes[:, 0:2]).max(axis=1)
-        img_size = np.array([image.shape[1], image.shape[0]])
 
-        img_patches = []
-        for i, det in enumerate(detections):
-            bbox_size = bbox_sizes[i]
-            cvimg = image.copy()
-            # Blur image to avoid aliasing artifacts
-            downsampling_factor = bbox_size / self.IMAGE_SIZE / 2.0
-            if downsampling_factor > 1.1:
-                cvimg = gaussian(
-                    cvimg, sigma=(downsampling_factor - 1) / 2,
-                    channel_axis=2, preserve_range=True,
-                )
-            img_patch, _trans = wilor_utils.generate_image_patch_cv2(
-                cvimg,
-                center[i][0], center[i][1],
-                bbox_size, bbox_size,
-                self.IMAGE_SIZE, self.IMAGE_SIZE,
-                det["is_right"] == 0, 1.0, 0,
-                border_mode=cv2.BORDER_CONSTANT,
+        img_patches = [
+            _pose_patch(
+                image, center[i][0], center[i][1], bbox_sizes[i],
+                det["is_right"] == 0, self.IMAGE_SIZE,
             )
-            img_patches.append(img_patch)
-
+            for i, (image, det) in enumerate(hands)
+        ]
         img_patches = torch.from_numpy(np.stack(img_patches)).to(
             device=self.device, dtype=self.dtype
         )
         output = self.model(img_patches)
         output = {k: v.cpu().float().numpy() for k, v in output.items()}
 
-        scaled_focal_length = self.focal_length / self.IMAGE_SIZE * img_size.max()
-        for i, det in enumerate(detections):
+        for i, (image, det) in enumerate(hands):
+            img_size = np.array([image.shape[1], image.shape[0]])
+            scaled_focal_length = self.focal_length / self.IMAGE_SIZE * img_size.max()
             preds = {key: val[[i]] for key, val in output.items()}
             right = det["is_right"]
             pred_cam = preds["pred_cam"]
@@ -333,7 +417,6 @@ class HandPoseEstimator:
                 camera_center=img_size[None] / 2,
             )
             det["pose_preds"] = preds
-        return detections
 
     def predict(self, image: np.ndarray, hand_conf: float = 0.3) -> list[dict]:
         """Detect hands in an ``(H, W, 3)`` uint8 RGB image and estimate their

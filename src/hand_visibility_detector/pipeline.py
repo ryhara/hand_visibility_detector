@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import io
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -43,7 +44,9 @@ class HandResult:
     """Bounding box in [x1, y1, x2, y2] format (image pixels)."""
 
     bbox_conf: float
-    """YOLO hand-detection confidence score."""
+    """YOLO hand-detection confidence score (for
+    :meth:`HandVisibilityPipeline.predict_boxes`, the score given with the box;
+    1.0 when none is given)."""
 
     is_right: bool
     """``True`` if the hand is a right hand."""
@@ -131,6 +134,12 @@ class HandVisibilityPipeline:
     >>> results = pipe.predict(image_rgb)
     >>> for r in results:
     ...     print(r.is_right, r.bbox_conf, r.visibility)
+
+    Hands found otherwise (another detector, a tracker, several cameras) skip
+    the detector; many images (video frames, camera views) can share batches:
+
+    >>> results = pipe.predict_boxes(image_rgb, [[x1, y1, x2, y2]], [True])
+    >>> per_image = pipe.predict_boxes_batch(images, boxes, is_right, batch_size=64)
     """
 
     def __init__(
@@ -304,55 +313,192 @@ class HandVisibilityPipeline:
         -------
         List of :class:`HandResult`, one per detected hand.
         """
+        detections = self._pose.detect(image, hand_conf=self.hand_conf)
+        return self._predict_detections(
+            [image], [detections], return_rotations,
+            batch_size=max(len(detections), 1),
+        )[0]
+
+    def predict_boxes(
+        self,
+        image: np.ndarray,
+        boxes: np.ndarray | Sequence[Sequence[float]],
+        is_right: np.ndarray | Sequence[bool],
+        scores: np.ndarray | Sequence[float] | None = None,
+        return_rotations: bool | None = None,
+    ) -> list[HandResult]:
+        """Run pose + visibility on hands whose boxes are given (found by
+        another detector, a tracker, several cameras, ...), without the hand
+        detector.
+
+        Parameters
+        ----------
+        image : (H, W, 3) uint8 RGB image.
+        boxes : (K, 4) hand boxes as [x1, y1, x2, y2] (image pixels), with
+            x2 > x1 and y2 > y1. They may reach outside the image.
+        is_right : (K,) whether each hand is a right hand (left hands are
+            mirrored for the models, as the detector's are).
+        scores : (K,) optional score of each box, reported as
+            :attr:`HandResult.bbox_conf` (1.0 when omitted).
+        return_rotations : As for :meth:`predict`.
+
+        Returns
+        -------
+        List of :class:`HandResult`, one per box, in the order of ``boxes``.
+        """
+        return self.predict_boxes_batch(
+            [image], [boxes], [is_right],
+            None if scores is None else [scores],
+            return_rotations=return_rotations,
+            batch_size=max(len(boxes), 1),
+        )[0]
+
+    def predict_boxes_batch(
+        self,
+        images: Sequence[np.ndarray],
+        boxes: Sequence[np.ndarray | Sequence[Sequence[float]]],
+        is_right: Sequence[np.ndarray | Sequence[bool]],
+        scores: Sequence[np.ndarray | Sequence[float]] | None = None,
+        return_rotations: bool | None = None,
+        batch_size: int = 32,
+    ) -> list[list[HandResult]]:
+        """:meth:`predict_boxes` over several images (e.g. the frames of a
+        video or the views of a camera rig; their sizes may differ). The hands
+        of all the images go through the pose model and the visibility network
+        ``batch_size`` at a time, which keeps a GPU busy when each image holds
+        only a hand or two.
+
+        ``boxes[i]``, ``is_right[i]`` (and ``scores[i]``) are the hands of
+        ``images[i]``, as for :meth:`predict_boxes`; an image may have none.
+        It also runs under the caller's ``torch.autocast`` (half precision);
+        check the keypoints against float32 ones before relying on it.
+
+        Returns
+        -------
+        One list of :class:`HandResult` per image, one result per box.
+        """
+        n_images = len(images)
+        if len(boxes) != n_images or len(is_right) != n_images or (
+            scores is not None and len(scores) != n_images
+        ):
+            raise ValueError(
+                "boxes, is_right (and scores) need one entry per image "
+                f"({n_images} images)"
+            )
+        detections = [
+            _box_detections(boxes[i], is_right[i], None if scores is None else scores[i])
+            for i in range(n_images)
+        ]
+        return self._predict_detections(images, detections, return_rotations, batch_size)
+
+    def _predict_detections(
+        self,
+        images: Sequence[np.ndarray],
+        detections: list[list[dict]],
+        return_rotations: bool | None,
+        batch_size: int,
+    ) -> list[list[HandResult]]:
+        """Pose + visibility of the hands ``detections[i]`` of ``images[i]``."""
         if return_rotations is None:
             return_rotations = self.return_rotations
-        detections = self._pose.predict(image, hand_conf=self.hand_conf)
-        if not detections:
-            return []
+        if batch_size < 1:
+            raise ValueError(f"batch_size must be at least 1, not {batch_size}")
+        self._pose.estimate_batch(images, detections, batch_size=batch_size)
 
-        # Prepare visibility crops
+        hands = [
+            (image, det) for image, dets in zip(images, detections) for det in dets
+        ]
+        vis_probs = [
+            self._visibility(hands[start:start + batch_size])
+            for start in range(0, len(hands), batch_size)
+        ]
+
+        results: list[list[HandResult]] = []
+        k = 0
+        for dets in detections:
+            image_results = []
+            for det in dets:
+                batch_index, row = divmod(k, batch_size)
+                image_results.append(
+                    _hand_result(det, vis_probs[batch_index][row], return_rotations)
+                )
+                k += 1
+            results.append(image_results)
+        return results
+
+    def _visibility(self, hands: list[tuple[np.ndarray, dict]]) -> np.ndarray:
+        """(B, 21) visibility probabilities of one batch of ``(image,
+        detection)`` pairs."""
         tensors = []
-        for det in detections:
-            bbox_xyxy = det["hand_bbox"]
-            bbox_xywh = xyxy_to_xywh(bbox_xyxy)
-            is_right = bool(det["is_right"])
-
+        for image, det in hands:
+            bbox_xywh = xyxy_to_xywh(det["hand_bbox"])
             cx, cy, side = expand_square_bbox(bbox_xywh, self.bbox_expand)
             patch, _ = crop_square(image, cx, cy, side, self.crop_size)
-            if not is_right:
+            if not bool(det["is_right"]):
                 patch = patch[:, ::-1, :].copy()
             tensors.append(to_model_tensor(patch))
 
         batch = torch.stack(tensors).to(self.device)
-
         with torch.no_grad():
-            vis_probs = self._vis_model.predict_proba(batch).cpu().numpy()
+            return self._vis_model.predict_proba(batch).float().cpu().numpy()
 
-        # Assemble results
-        results: list[HandResult] = []
-        for i, det in enumerate(detections):
-            wp = det["pose_preds"]
-            global_orient = global_orient_euler = None
-            hand_pose = hand_pose_euler = None
-            if return_rotations:
-                global_orient = wp["global_orient"].reshape(3).copy()
-                hand_pose = wp["hand_pose"].reshape(-1, 3).copy()
-                global_orient_euler = axis_angle_to_euler(global_orient)
-                hand_pose_euler = axis_angle_to_euler(hand_pose)
-            results.append(
-                HandResult(
-                    hand_bbox=det["hand_bbox"],
-                    bbox_conf=det.get("bbox_conf", 0.0),
-                    is_right=bool(det["is_right"]),
-                    keypoints_2d=wp["pred_keypoints_2d"][0],
-                    keypoints_3d=wp["pred_keypoints_3d"][0],
-                    visibility=vis_probs[i],
-                    wilor_preds=wp,
-                    global_orient=global_orient,
-                    global_orient_euler=global_orient_euler,
-                    hand_pose=hand_pose,
-                    hand_pose_euler=hand_pose_euler,
-                )
-            )
 
-        return results
+def _box_detections(
+    boxes: np.ndarray | Sequence[Sequence[float]],
+    is_right: np.ndarray | Sequence[bool],
+    scores: np.ndarray | Sequence[float] | None,
+) -> list[dict]:
+    """Given hand boxes as the detection dicts of
+    :meth:`HandPoseEstimator.detect`."""
+    boxes = np.asarray(boxes, dtype=np.float64)
+    if boxes.size == 0:
+        boxes = boxes.reshape(0, 4)
+    if boxes.ndim != 2 or boxes.shape[1] != 4:
+        raise ValueError(f"boxes must be (K, 4) [x1, y1, x2, y2], not {boxes.shape}")
+    if not np.isfinite(boxes).all() or (
+        (boxes[:, 2] <= boxes[:, 0]) | (boxes[:, 3] <= boxes[:, 1])
+    ).any():
+        raise ValueError("boxes must be finite, with x2 > x1 and y2 > y1")
+    is_right = np.asarray(is_right).reshape(-1)
+    scores = (
+        np.ones(len(boxes)) if scores is None
+        else np.asarray(scores, dtype=np.float64).reshape(-1)
+    )
+    if len(is_right) != len(boxes) or len(scores) != len(boxes):
+        raise ValueError(
+            f"{len(boxes)} boxes but {len(is_right)} is_right and {len(scores)} scores"
+        )
+    return [
+        {
+            "hand_bbox": box.tolist(),
+            "is_right": float(bool(right)),
+            "bbox_conf": float(score),
+        }
+        for box, right, score in zip(boxes, is_right, scores)
+    ]
+
+
+def _hand_result(det: dict, visibility: np.ndarray, return_rotations: bool) -> HandResult:
+    """A detection dict (with ``pose_preds``) and its visibility as a
+    :class:`HandResult`."""
+    wp = det["pose_preds"]
+    global_orient = global_orient_euler = None
+    hand_pose = hand_pose_euler = None
+    if return_rotations:
+        global_orient = wp["global_orient"].reshape(3).copy()
+        hand_pose = wp["hand_pose"].reshape(-1, 3).copy()
+        global_orient_euler = axis_angle_to_euler(global_orient)
+        hand_pose_euler = axis_angle_to_euler(hand_pose)
+    return HandResult(
+        hand_bbox=det["hand_bbox"],
+        bbox_conf=det.get("bbox_conf", 0.0),
+        is_right=bool(det["is_right"]),
+        keypoints_2d=wp["pred_keypoints_2d"][0],
+        keypoints_3d=wp["pred_keypoints_3d"][0],
+        visibility=visibility,
+        wilor_preds=wp,
+        global_orient=global_orient,
+        global_orient_euler=global_orient_euler,
+        hand_pose=hand_pose,
+        hand_pose_euler=hand_pose_euler,
+    )
